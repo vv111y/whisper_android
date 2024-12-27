@@ -75,7 +75,6 @@ public class MainActivity extends AppCompatActivity {
         copyAssetsToSdcard(this, sdcardDataFolder, EXTENSIONS_TO_COPY);
 
         ArrayList<File> tfliteFiles = getFilesWithExtension(sdcardDataFolder, ".tflite");
-        ArrayList<File> waveFiles = getFilesWithExtension(sdcardDataFolder, ".wav");
 
         // Initialize default model to use
         selectedTfliteFile = new File(sdcardDataFolder, DEFAULT_MODEL_TO_USE);
@@ -95,27 +94,7 @@ public class MainActivity extends AppCompatActivity {
             }
         });
 
-        Spinner spinnerWave = findViewById(R.id.spnrWaveFiles);
-        spinnerWave.setAdapter(getFileArrayAdapter(waveFiles));
-        spinnerWave.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
-            @Override
-            public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
-                // Cast item to File and get the file name
-                selectedWaveFile = (File) parent.getItemAtPosition(position);
-
-                // Check if the selected file is the recording file
-                if (selectedWaveFile.getName().equals(WaveUtil.RECORDING_FILE)) {
-                    btnRecord.setVisibility(View.VISIBLE);
-                } else {
-                    btnRecord.setVisibility(View.GONE);
-                }
-            }
-
-            @Override
-            public void onNothingSelected(AdapterView<?> parent) {
-                // Handle case when nothing is selected, if needed
-            }
-        });
+        selectedWaveFile = new File(sdcardDataFolder+"/"+WaveUtil.RECORDING_FILE);
 
         // Implementation of record button functionality
         btnRecord = findViewById(R.id.btnRecord);
