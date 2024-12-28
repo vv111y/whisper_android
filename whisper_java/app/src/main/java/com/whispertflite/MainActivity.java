@@ -39,13 +39,13 @@ import java.util.ArrayList;
 public class MainActivity extends AppCompatActivity {
     private static final String TAG = "MainActivity";
 
-    // whisper-tiny.tflite and whisper-base-nooptim.en.tflite works well
-    private static final String DEFAULT_MODEL_TO_USE = "whisper-small.tflite";
+    // whisper-small.tflite works well for multi-lingual
+    private static final String MULTI_LINGUAL_MODEL = "whisper-small.tflite";
     // English only model ends with extension ".en.tflite"
     private static final String ENGLISH_ONLY_MODEL_EXTENSION = ".en.tflite";
     private static final String ENGLISH_ONLY_VOCAB_FILE = "filters_vocab_en.bin";
     private static final String MULTILINGUAL_VOCAB_FILE = "filters_vocab_multilingual.bin";
-    private static final String[] EXTENSIONS_TO_COPY = {"tflite", "bin", "wav", "pcm"};
+    private static final String[] EXTENSIONS_TO_COPY = {"bin"};
 
     private TextView tvStatus;
     private TextView tvResult;
@@ -77,7 +77,13 @@ public class MainActivity extends AppCompatActivity {
         ArrayList<File> tfliteFiles = getFilesWithExtension(sdcardDataFolder, ".tflite");
 
         // Initialize default model to use
-        selectedTfliteFile = new File(sdcardDataFolder, DEFAULT_MODEL_TO_USE);
+        selectedTfliteFile = new File(sdcardDataFolder, MULTI_LINGUAL_MODEL);
+
+        // Sort the list to ensure MULTI_LINGUAL_MODEL is at the top (Default)
+        if (tfliteFiles.contains(selectedTfliteFile)) {
+            tfliteFiles.remove(selectedTfliteFile);
+            tfliteFiles.add(0, selectedTfliteFile);
+        }
 
         Spinner spinnerTflite = findViewById(R.id.spnrTfliteFiles);
         spinnerTflite.setAdapter(getFileArrayAdapter(tfliteFiles));
@@ -230,16 +236,17 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    private @NonNull ArrayAdapter<File> getFileArrayAdapter(ArrayList<File> waveFiles) {
-        ArrayAdapter<File> adapter = new ArrayAdapter<>(this, android.R.layout.simple_spinner_item, waveFiles) {
+    private @NonNull ArrayAdapter<File> getFileArrayAdapter(ArrayList<File> tfliteFiles) {
+        ArrayAdapter<File> adapter = new ArrayAdapter<>(this, android.R.layout.simple_spinner_item, tfliteFiles) {
             @Override
             public View getView(int position, View convertView, ViewGroup parent) {
                 View view = super.getView(position, convertView, parent);
                 TextView textView = view.findViewById(android.R.id.text1);
-                if ((getItem(position).getName()).equals(DEFAULT_MODEL_TO_USE))
+                if ((getItem(position).getName()).equals(MULTI_LINGUAL_MODEL))
                     textView.setText("Multi-lingual, slow");
                 else
                     textView.setText("English only, fast");
+
                 return view;
             }
 
@@ -247,10 +254,11 @@ public class MainActivity extends AppCompatActivity {
             public View getDropDownView(int position, View convertView, ViewGroup parent) {
                 View view = super.getDropDownView(position, convertView, parent);
                 TextView textView = view.findViewById(android.R.id.text1);
-                if ((getItem(position).getName()).equals(DEFAULT_MODEL_TO_USE))
+                if ((getItem(position).getName()).equals(MULTI_LINGUAL_MODEL))
                     textView.setText("Multi-lingual, slow");
                 else
                     textView.setText("English only, fast");
+
                 return view;
             }
         };

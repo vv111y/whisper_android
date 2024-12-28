@@ -43,6 +43,10 @@ android {
         jvmTarget = '11'
     }
 
+    buildFeatures {
+        viewBinding true
+    }
+
     dependenciesInfo {
         // Disable including dependency metadata when building APKs
         includeInApk = false
