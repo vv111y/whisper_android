@@ -29,6 +29,7 @@ class DownloadActivity  : AppCompatActivity() {
     }
 
     fun download(view: View) {
+        binding?.downloadSize?.setVisibility(View.VISIBLE)
         binding?.downloadProgress?.setVisibility(View.VISIBLE)
         binding?.buttonStart?.setVisibility(View.INVISIBLE)
         Downloader.downloadModels(this, binding)

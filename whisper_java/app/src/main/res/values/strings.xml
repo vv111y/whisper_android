@@ -9,5 +9,5 @@
     <string name="need_record_audio_permission">"This app needs RECORD_AUDIO permission"</string>
     <string name="error_download">Download error</string>
     <string name="download_model">Download Model</string>
-    <string name="download_model_text">Download Whisper models from Huggingface (~400MB)</string>
+    <string name="download_model_text">\nDownload Whisper models from Hugging Face (~400 MB)</string>
 </resources>
