@@ -5,15 +5,21 @@ import android.annotation.SuppressLint;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
+import android.content.Intent;
+import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.content.res.AssetManager;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.preference.PreferenceManager;
+import android.provider.Settings;
 import android.util.Log;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.inputmethod.InputMethodInfo;
+import android.view.inputmethod.InputMethodManager;
 import android.widget.AdapterView;
 import android.widget.ArrayAdapter;
 import android.widget.CheckBox;
@@ -37,16 +43,18 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.util.ArrayList;
+import java.util.List;
 
 public class MainActivity extends AppCompatActivity {
     private static final String TAG = "MainActivity";
 
     // whisper-small.tflite works well for multi-lingual
-    private static final String MULTI_LINGUAL_MODEL = "whisper-small.tflite";
+    public static final String MULTI_LINGUAL_MODEL = "whisper-small.tflite";
+    public static final String ENGLISH_ONLY_MODEL = "whisper-tiny.en.tflite";
     // English only model ends with extension ".en.tflite"
-    private static final String ENGLISH_ONLY_MODEL_EXTENSION = ".en.tflite";
-    private static final String ENGLISH_ONLY_VOCAB_FILE = "filters_vocab_en.bin";
-    private static final String MULTILINGUAL_VOCAB_FILE = "filters_vocab_multilingual.bin";
+    public static final String ENGLISH_ONLY_MODEL_EXTENSION = ".en.tflite";
+    public static final String ENGLISH_ONLY_VOCAB_FILE = "filters_vocab_en.bin";
+    public static final String MULTILINGUAL_VOCAB_FILE = "filters_vocab_multilingual.bin";
     private static final String[] EXTENSIONS_TO_COPY = {"bin"};
 
     private TextView tvStatus;
@@ -54,6 +62,7 @@ public class MainActivity extends AppCompatActivity {
     private FloatingActionButton fabCopy;
     private ImageButton btnRecord;
     private CheckBox append;
+    private boolean multiLingual;
 
     private Recorder mRecorder = null;
     private Whisper mWhisper = null;
@@ -61,10 +70,10 @@ public class MainActivity extends AppCompatActivity {
     private File sdcardDataFolder = null;
     private File selectedWaveFile = null;
     private File selectedTfliteFile = null;
+    private SharedPreferences sp = null;
 
     private long startTime = 0;
-    private final boolean loopTesting = false;
-    private final SharedResource transcriptionSync = new SharedResource();
+
     private final Handler handler = new Handler(Looper.getMainLooper());
 
     @SuppressLint("ClickableViewAccessibility")
@@ -72,6 +81,11 @@ public class MainActivity extends AppCompatActivity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
+
+        checkInputMethodEnabled();
+
+        sp = PreferenceManager.getDefaultSharedPreferences(this);
+        multiLingual = sp.getBoolean("multiLingual",true);
         append = findViewById(R.id.mode_append);
         // Call the method to copy specific file types from assets to data folder
         sdcardDataFolder = this.getExternalFilesDir(null);
@@ -80,7 +94,7 @@ public class MainActivity extends AppCompatActivity {
         ArrayList<File> tfliteFiles = getFilesWithExtension(sdcardDataFolder, ".tflite");
 
         // Initialize default model to use
-        selectedTfliteFile = new File(sdcardDataFolder, MULTI_LINGUAL_MODEL);
+        selectedTfliteFile = new File(sdcardDataFolder, multiLingual? MULTI_LINGUAL_MODEL : ENGLISH_ONLY_MODEL);
 
         // Sort the list to ensure MULTI_LINGUAL_MODEL is at the top (Default)
         if (tfliteFiles.contains(selectedTfliteFile)) {
@@ -95,6 +109,9 @@ public class MainActivity extends AppCompatActivity {
             public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
                 deinitModel();
                 selectedTfliteFile = (File) parent.getItemAtPosition(position);
+                SharedPreferences.Editor editor = sp.edit();
+                editor.putBoolean("multiLingual", selectedTfliteFile.getName().equals(MULTI_LINGUAL_MODEL));
+                editor.apply();
             }
 
             @Override
@@ -112,6 +129,7 @@ public class MainActivity extends AppCompatActivity {
             if (event.getAction() == MotionEvent.ACTION_DOWN) {
                 // Pressed
                 Log.d(TAG, "Start recording...");
+                if (mWhisper != null) stopTranscription();
                 startRecording();
             } else if (event.getAction() == MotionEvent.ACTION_UP) {
                 // Released
@@ -125,21 +143,6 @@ public class MainActivity extends AppCompatActivity {
                     if (!mWhisper.isInProgress()) {
                         Log.d(TAG, "Start transcription...");
                         startTranscription(selectedWaveFile.getAbsolutePath());
-
-                        // only for loop testing
-                        if (loopTesting) {
-                            new Thread(() -> {
-                                for (int i = 0; i < 1000; i++) {
-                                    if (!mWhisper.isInProgress())
-                                        startTranscription(selectedWaveFile.getAbsolutePath());
-                                    else
-                                        Log.d(TAG, "Whisper is already in progress...!");
-
-                                    boolean wasNotified = transcriptionSync.waitForSignalWithTimeout(15000);
-                                    Log.d(TAG, wasNotified ? "Transcription Notified...!" : "Transcription Timeout...!");
-                                }
-                            }).start();
-                        }
                     } else {
                         Log.d(TAG, "Whisper is already in progress...!");
                         stopTranscription();
@@ -155,7 +158,7 @@ public class MainActivity extends AppCompatActivity {
         fabCopy = findViewById(R.id.fabCopy);
         fabCopy.setOnClickListener(v -> {
             // Get the text from tvResult
-            String textToCopy = tvResult.getText().toString();
+            String textToCopy = tvResult.getText().toString().trim();
 
             // Copy the text to the clipboard
             ClipboardManager clipboard = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
@@ -181,16 +184,31 @@ public class MainActivity extends AppCompatActivity {
 
             @Override
             public void onDataReceived(float[] samples) {
-//                mWhisper.writeBuffer(samples);
+
             }
         });
-
 
         // Assume this Activity is the current activity, check record permission
         checkRecordPermission();
 
-        // for debugging
-//        testParallelProcessing();
+    }
+
+    private void checkInputMethodEnabled() {
+        InputMethodManager imm = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
+        List<InputMethodInfo> enabledInputMethodList = imm.getEnabledInputMethodList();
+
+        String myInputMethodId = getPackageName() + "/" + WhisperInputMethodService.class.getName();
+        boolean inputMethodEnabled = false;
+        for (InputMethodInfo imi : enabledInputMethodList) {
+            if (imi.getId().equals(myInputMethodId)) {
+                inputMethodEnabled = true;
+                break;
+            }
+        }
+        if (!inputMethodEnabled) {
+            Intent intent = new Intent(Settings.ACTION_INPUT_METHOD_SETTINGS);
+            startActivity(intent);
+        }
     }
 
     // Model initialization
@@ -212,9 +230,6 @@ public class MainActivity extends AppCompatActivity {
                     startTime = System.currentTimeMillis();
                 } if (message.equals(Whisper.MSG_PROCESSING_DONE)) {
 //                    handler.post(() -> tvStatus.setText(message));
-                    // for testing
-                    if (loopTesting)
-                        transcriptionSync.sendSignal();
                 } else if (message.equals(Whisper.MSG_FILE_NOT_FOUND)) {
                     handler.post(() -> tvStatus.setText(message));
                     Log.d(TAG, "File not found error...!");
@@ -369,34 +384,6 @@ public class MainActivity extends AppCompatActivity {
         }
 
         return filteredFiles;
-    }
-
-    static class SharedResource {
-        // Synchronized method for Thread 1 to wait for a signal with a timeout
-        public synchronized boolean waitForSignalWithTimeout(long timeoutMillis) {
-            long startTime = System.currentTimeMillis();
-
-            try {
-                wait(timeoutMillis);  // Wait for the given timeout
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();  // Restore interrupt status
-                return false;  // Thread interruption as timeout
-            }
-
-            long elapsedTime = System.currentTimeMillis() - startTime;
-
-            // Check if wait returned due to notify or timeout
-            if (elapsedTime < timeoutMillis) {
-                return true;  // Returned due to notify
-            } else {
-                return false;  // Returned due to timeout
-            }
-        }
-
-        // Synchronized method for Thread 2 to send a signal
-        public synchronized void sendSignal() {
-            notify();  // Notifies the waiting thread
-        }
     }
 
 }

@@ -46,7 +46,7 @@
             android:layout_margin="3dp"
             android:layout_weight="1"
             android:background="@drawable/rounded_button_background"
-            android:src="@drawable/mic_48dp" />
+            android:src="@drawable/ic_mic_48dp" />
 
 
     </LinearLayout>
