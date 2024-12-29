@@ -12,6 +12,7 @@ import android.content.pm.PackageManager;
 import android.inputmethodservice.InputMethodService;
 
 import android.preference.PreferenceManager;
+import android.view.KeyEvent;
 import android.view.MotionEvent;
 import android.view.View;
 import android.widget.ImageButton;
@@ -29,13 +30,14 @@ import java.io.File;
 public class WhisperInputMethodService extends InputMethodService {
     private ImageButton btnRecord;
     private ImageButton btnKeyboard;
+    private ImageButton btnEnter;
     private TextView tvStatus;
     private Recorder mRecorder = null;
     private Whisper mWhisper = null;
     private File sdcardDataFolder = null;
     private File recWavFile = null;
     private File selectedTfliteFile = null;
-    private ProgressBar progressBar = null;
+    private ProgressBar processingBar = null;
     private SharedPreferences sp = null;
     private boolean multiLingual;
 
@@ -56,7 +58,8 @@ public class WhisperInputMethodService extends InputMethodService {
         View view = getLayoutInflater().inflate(R.layout.voice_service, null);
         btnRecord = view.findViewById(R.id.btnRecord);
         btnKeyboard = view.findViewById(R.id.btnKeyboard);
-        progressBar = view.findViewById(R.id.processing_bar);
+        btnEnter = view.findViewById(R.id.btnEnter);
+        processingBar = view.findViewById(R.id.processing_bar);
         tvStatus = view.findViewById(R.id.tv_status);
         sdcardDataFolder = this.getExternalFilesDir(null);
         sp = PreferenceManager.getDefaultSharedPreferences(this);
@@ -111,6 +114,11 @@ public class WhisperInputMethodService extends InputMethodService {
             if (mWhisper != null) stopTranscription();
             switchToPreviousInputMethod();
         });
+
+        btnEnter.setOnClickListener(v -> {
+            getCurrentInputConnection().sendKeyEvent(new KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_ENTER));
+        });
+
         return view;
     }
 
@@ -134,7 +142,7 @@ public class WhisperInputMethodService extends InputMethodService {
 
             @Override
             public void onResultReceived(String result) {
-                progressBar.setIndeterminate(false);
+                processingBar.setIndeterminate(false);
                 getCurrentInputConnection().commitText(result.trim(),1);
             }
         });
@@ -144,11 +152,11 @@ public class WhisperInputMethodService extends InputMethodService {
         mWhisper.setFilePath(waveFilePath);
         mWhisper.setAction(Whisper.ACTION_TRANSCRIBE);
         mWhisper.start();
-        progressBar.setIndeterminate(true);
+        processingBar.setIndeterminate(true);
     }
 
     private void stopTranscription() {
-        progressBar.setIndeterminate(false);
+        processingBar.setIndeterminate(false);
         mWhisper.stop();
     }
 

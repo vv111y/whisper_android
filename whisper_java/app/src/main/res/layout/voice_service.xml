@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout
-    xmlns:android="http://schemas.android.com/apk/res/android"
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:orientation="vertical"
     android:padding="16dp">
 
@@ -38,6 +38,15 @@
             android:background="@drawable/rounded_button_background"
             android:src="@drawable/ic_keyboard_48dp" />
 
+        <ImageButton
+            android:id="@+id/btnEnter"
+            android:layout_width="96dp"
+            android:layout_height="wrap_content"
+            android:layout_margin="3dp"
+            android:layout_weight="1"
+            android:background="@drawable/rounded_button_background"
+            android:src="@drawable/ic_keyboard_return_48dp" />
+
     </LinearLayout>
 
     <ProgressBar
@@ -45,6 +54,7 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:indeterminate="false"
-        android:progressTint="@color/colorAccent"
+        android:progressBackgroundTint="@color/lightGrey"
+        android:indeterminateTint="@color/colorAccent"
         style="?android:attr/progressBarStyleHorizontal"/>
 </LinearLayout>

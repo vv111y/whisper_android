@@ -24,6 +24,7 @@ import android.widget.AdapterView;
 import android.widget.ArrayAdapter;
 import android.widget.CheckBox;
 import android.widget.ImageButton;
+import android.widget.ProgressBar;
 import android.widget.Spinner;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -63,6 +64,7 @@ public class MainActivity extends AppCompatActivity {
     private ImageButton btnRecord;
     private CheckBox append;
     private boolean multiLingual;
+    private ProgressBar processingBar;
 
     private Recorder mRecorder = null;
     private Whisper mWhisper = null;
@@ -83,7 +85,7 @@ public class MainActivity extends AppCompatActivity {
         setContentView(R.layout.activity_main);
 
         checkInputMethodEnabled();
-
+        processingBar = findViewById(R.id.processing_bar);
         sp = PreferenceManager.getDefaultSharedPreferences(this);
         multiLingual = sp.getBoolean("multiLingual",true);
         append = findViewById(R.id.mode_append);
@@ -240,7 +242,7 @@ public class MainActivity extends AppCompatActivity {
             public void onResultReceived(String result) {
                 long timeTaken = System.currentTimeMillis() - startTime;
                 handler.post(() -> tvStatus.setText("Processing done in " + timeTaken + "ms"));
-
+                handler.post(() -> processingBar.setIndeterminate(false));
                 Log.d(TAG, "Result: " + result);
                 handler.post(() -> tvResult.append(result));
             }
@@ -323,9 +325,11 @@ public class MainActivity extends AppCompatActivity {
         mWhisper.setFilePath(waveFilePath);
         mWhisper.setAction(Whisper.ACTION_TRANSCRIBE);
         mWhisper.start();
+        processingBar.setIndeterminate(true);
     }
 
     private void stopTranscription() {
+        processingBar.setIndeterminate(false);
         mWhisper.stop();
     }
 

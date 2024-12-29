@@ -94,12 +94,15 @@
             android:layout_height="wrap_content" />
 
     </LinearLayout>
-    <View
+
+    <ProgressBar
+        android:id="@+id/processing_bar"
         android:layout_width="match_parent"
-        android:layout_height="1dp"
-        android:background="@android:color/darker_gray"
-        android:layout_marginTop="16dp"
-        android:layout_marginBottom="16dp" />
+        android:layout_height="wrap_content"
+        android:indeterminate="false"
+        android:progressBackgroundTint="@color/lightGrey"
+        android:indeterminateTint="@color/colorAccent"
+        style="?android:attr/progressBarStyleHorizontal"/>
 
     <ScrollView
         android:id="@+id/scrollView"
