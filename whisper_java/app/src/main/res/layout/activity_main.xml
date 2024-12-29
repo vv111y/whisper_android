@@ -19,8 +19,8 @@
             android:layout_width="60dp"
             android:layout_height="wrap_content"
             android:textSize="15sp"
-            android:textColor="@color/colorPrimary"
-            android:text="Select model: "
+            android:textColor="@color/colorAccent"
+            android:text="@string/select_model"
             android:layout_weight="1"
             android:layout_marginEnd="8dp" />
 
@@ -46,8 +46,7 @@
             android:layout_margin="3dp"
             android:layout_weight="1"
             android:background="@drawable/rounded_button_background"
-            android:src="@drawable/mic_48dp"
-            android:text="@string/record" />
+            android:src="@drawable/mic_48dp" />
 
 
     </LinearLayout>
@@ -62,8 +61,8 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:textSize="15sp"
-            android:textColor="@color/colorPrimary"
-            android:text="Status: "
+            android:textColor="@color/colorAccent"
+            android:text="@string/status"
             android:layout_marginEnd="8dp" />
 
         <TextView
@@ -75,6 +74,26 @@
             android:layout_marginStart="8dp" />
     </LinearLayout>
 
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="start">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:textSize="15sp"
+            android:textColor="@color/colorAccent"
+            android:text="@string/append" />
+
+        <CheckBox
+            android:id="@+id/mode_append"
+            android:layout_marginStart="16dp"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content" />
+
+    </LinearLayout>
     <View
         android:layout_width="match_parent"
         android:layout_height="1dp"
@@ -102,7 +121,7 @@
         android:layout_height="wrap_content"
         android:layout_gravity="bottom|end"
         android:layout_margin="16dp"
-        android:src="@android:drawable/ic_menu_save"
-        android:contentDescription="Copy" />
+        android:src="@drawable/ic_copy"
+        android:contentDescription="@string/copy" />
 
 </LinearLayout>

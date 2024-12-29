@@ -2,9 +2,7 @@
 <resources>
     <color name="black">#FF000000</color>
     <color name="white">#FFFFFFFF</color>
-    <color name="buttonBackground">#DDDDDD</color>
-    <color name="buttonBackgroundPressed">#999999</color>
-    <color name="colorPrimary">#008577</color>
-    <color name="colorPrimaryDark">#00574B</color>
-    <color name="colorAccent">#D81B60</color>
+    <color name="lightGrey">#DDDDDD</color>
+    <color name="darkGrey">#999999</color>
+    <color name="colorAccent">#996750A4</color>
 </resources>

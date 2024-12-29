@@ -17,7 +17,7 @@
             android:foregroundGravity="top"
             android:focusableInTouchMode="true"
             android:focusable="true"
-            android:src="@drawable/mic_48dp" />
+            android:src="@drawable/mic_dark_48dp" />
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="0dp"
@@ -30,10 +30,11 @@
                 android:layout_marginStart="16dp"
                 android:layout_marginEnd="16dp"
                 android:orientation="vertical"
-                android:background="@drawable/rounded_button_background"
+                android:background="@drawable/rounded_button_frame"
                 android:gravity="center_horizontal">
 
                 <TextView
+                    android:layout_marginTop="10dp"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:gravity="center"
@@ -55,6 +56,8 @@
                     android:layout_height="wrap_content"
                     android:layout_marginTop="10dp"
                     android:layout_marginBottom="10dp"
+                    android:background="@drawable/rounded_button_background_pressed"
+                    android:backgroundTint="@color/lightGrey"
                     android:src="@drawable/ic_download_48dp"
                     android:onClick="download"
                     />
@@ -80,8 +83,8 @@
                     android:layout_marginTop="16dp"
                     android:layout_marginEnd="16dp"
                     android:layout_marginBottom="16dp"
-                    android:progressBackgroundTint="@color/buttonBackgroundPressed"
-                    android:progressTint="@color/black"
+                    android:progressBackgroundTint="@color/darkGrey"
+                    android:progressTint="@color/colorAccent"
                     tools:progress="0" />
 
             </LinearLayout>
@@ -92,7 +95,8 @@
                 android:layout_height="wrap_content"
                 android:layout_marginTop="10dp"
                 android:layout_gravity="center_horizontal"
-                android:text="Start"
+                android:text="@string/start"
+                android:backgroundTint="@color/colorAccent"
                 android:visibility="gone"
                 android:onClick="startMain"/>
         </LinearLayout>

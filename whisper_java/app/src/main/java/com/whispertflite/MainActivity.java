@@ -16,6 +16,7 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.widget.AdapterView;
 import android.widget.ArrayAdapter;
+import android.widget.CheckBox;
 import android.widget.ImageButton;
 import android.widget.Spinner;
 import android.widget.TextView;
@@ -51,6 +52,7 @@ public class MainActivity extends AppCompatActivity {
     private TextView tvResult;
     private FloatingActionButton fabCopy;
     private ImageButton btnRecord;
+    private CheckBox append;
 
     private Recorder mRecorder = null;
     private Whisper mWhisper = null;
@@ -69,7 +71,7 @@ public class MainActivity extends AppCompatActivity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
-
+        append = findViewById(R.id.mode_append);
         // Call the method to copy specific file types from assets to data folder
         sdcardDataFolder = this.getExternalFilesDir(null);
         copyAssetsToSdcard(this, sdcardDataFolder, EXTENSIONS_TO_COPY);
@@ -169,7 +171,7 @@ public class MainActivity extends AppCompatActivity {
                 handler.post(() -> tvStatus.setText(message));
 
                 if (message.equals(Recorder.MSG_RECORDING)) {
-                    handler.post(() -> tvResult.setText(""));
+                    if (!append.isChecked()) handler.post(() -> tvResult.setText(""));
                     handler.post(() -> btnRecord.setBackgroundResource(R.drawable.rounded_button_background_pressed));
                 } else if (message.equals(Recorder.MSG_RECORDING_DONE)) {
                     handler.post(() -> btnRecord.setBackgroundResource(R.drawable.rounded_button_background));
@@ -205,7 +207,7 @@ public class MainActivity extends AppCompatActivity {
 
                 if (message.equals(Whisper.MSG_PROCESSING)) {
                     handler.post(() -> tvStatus.setText(message));
-                    handler.post(() -> tvResult.setText(""));
+                    //handler.post(() -> tvResult.setText(""));
                     startTime = System.currentTimeMillis();
                 } if (message.equals(Whisper.MSG_PROCESSING_DONE)) {
 //                    handler.post(() -> tvStatus.setText(message));
