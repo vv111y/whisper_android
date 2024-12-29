@@ -11,6 +11,7 @@ import android.util.Log;
 
 import androidx.core.app.ActivityCompat;
 
+import com.whispertflite.R;
 import com.whispertflite.utils.WaveUtil;
 
 import java.io.ByteArrayOutputStream;
@@ -139,7 +140,7 @@ public class Recorder {
     private void recordAudio() {
         if (ActivityCompat.checkSelfPermission(mContext, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             Log.d(TAG, "AudioRecord permission is not granted");
-            sendUpdate("Permission not granted for recording");
+            sendUpdate(mContext.getString(R.string.need_record_audio_permission));
             return;
         }
 

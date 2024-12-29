@@ -20,6 +20,7 @@ import android.widget.CheckBox;
 import android.widget.ImageButton;
 import android.widget.Spinner;
 import android.widget.TextView;
+import android.widget.Toast;
 
 import androidx.annotation.NonNull;
 import androidx.appcompat.app.AppCompatActivity;
@@ -275,6 +276,7 @@ public class MainActivity extends AppCompatActivity {
         } else {
             Log.d(TAG, "Requesting record permission");
             requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO}, 0);
+            Toast.makeText(this, getString(R.string.need_record_audio_permission), Toast.LENGTH_SHORT).show();
         }
     }
 
