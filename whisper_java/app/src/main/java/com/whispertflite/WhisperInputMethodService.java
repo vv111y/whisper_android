@@ -143,7 +143,7 @@ public class WhisperInputMethodService extends InputMethodService {
             @Override
             public void onResultReceived(String result) {
                 processingBar.setIndeterminate(false);
-                getCurrentInputConnection().commitText(result.trim(),1);
+                if (result.trim().length() > 0) getCurrentInputConnection().commitText(result.trim()+" ",1);
             }
         });
     }
