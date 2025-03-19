@@ -65,6 +65,7 @@ whisper_java/.DS_Store
 whisper_native/.DS_Store
 whisper_java/Thumbs.db
 whisper_native/Thumbs.db
+**/.DS_Store
 
 # Coverage and reports
 whisper_java/coverage/
