@@ -46,6 +46,9 @@ import java.util.ArrayList;
 import android.app.AlertDialog;
 import android.os.Build;
 import android.provider.Settings;
+import android.content.ActivityNotFoundException;
+import androidx.documentfile.provider.DocumentFile;
+import androidx.core.content.FileProvider;
 
 public class MainActivity extends AppCompatActivity {
     private static final String TAG = "MainActivity";
@@ -308,13 +311,47 @@ public class MainActivity extends AppCompatActivity {
                 Log.d(TAG, "Result: " + result);
                 handler.post(() -> tvResult.append(result));
                 
-                // If we just transcribed a file that was selected via the file picker,
-                // also save the transcription to a text file
-                if (mWhisper.getFilePath() != null && !mWhisper.getFilePath().equals(selectedWaveFile.getAbsolutePath())) {
+                // Always save to cache first
+                File cachedTranscription = saveTranscriptionToCache(result);
+                
+                // If we're processing a selected file (not from the dropdown)
+                if (selectedAudioUri != null) {
+                    handler.post(() -> {
+                        // Show dialog with options for the transcription
+                        new AlertDialog.Builder(MainActivity.this)
+                            .setTitle("Transcription Complete")
+                            .setMessage("What would you like to do with the transcription?")
+                            .setPositiveButton("Share", (dialog, which) -> {
+                                shareTranscription(result);
+                            })
+                            .setNegativeButton("Save", (dialog, which) -> {
+                                saveTranscriptionWithSaf(selectedAudioUri, result);
+                            })
+                            .setNeutralButton("Close", null)
+                            .show();
+                        
+                        // Reset the selected URI
+                        selectedAudioUri = null;
+                    });
+                }
+                // If we're processing a file from the dropdown
+                else if (mWhisper.getFilePath() != null) {
                     String textFilePath = saveTranscriptionToFile(mWhisper.getFilePath(), result);
                     if (textFilePath != null) {
-                        handler.post(() -> Toast.makeText(MainActivity.this, 
-                                "Transcription saved to: " + textFilePath, Toast.LENGTH_LONG).show());
+                        handler.post(() -> {
+                            String message = "Transcription saved to: " + textFilePath;
+                            Toast.makeText(MainActivity.this, message, Toast.LENGTH_LONG).show();
+                            
+                            // Offer to share this transcription too
+                            new AlertDialog.Builder(MainActivity.this)
+                                .setTitle("Share Transcription?")
+                                .setMessage("Would you like to share this transcription?")
+                                .setPositiveButton("Share", (dialog, which) -> {
+                                    shareTranscription(result);
+                                })
+                                .setNegativeButton("No", null)
+                                .show();
+                        });
                     }
                 }
             }
@@ -578,27 +615,30 @@ public class MainActivity extends AppCompatActivity {
     private void processAudioFile(Uri audioUri) {
         try {
             // Take persistent permission for future access
-            getContentResolver().takePersistableUriPermission(audioUri, 
-                Intent.FLAG_GRANT_READ_URI_PERMISSION);
-                
-            // Get file path from URI (try modern content resolver approach first)
-            String filePath = getPathFromUri(audioUri);
-            
-            // If direct path retrieval fails or returns null, use the URI directly
-            if (filePath == null) {
-                Log.d(TAG, "Creating temporary file from URI");
-                File tempFile = createTempAudioFile(audioUri);
-                if (tempFile != null) {
-                    filePath = tempFile.getAbsolutePath();
-                } else {
-                    Toast.makeText(this, "Failed to process audio file", Toast.LENGTH_SHORT).show();
-                    return;
-                }
+            try {
+                getContentResolver().takePersistableUriPermission(audioUri, 
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            } catch (SecurityException e) {
+                Log.w(TAG, "Could not take persistable permission: " + e.getMessage());
+                // Continue anyway as we already have the URI
             }
-            
-            // Prepare for transcription
+                
             tvStatus.setText("Preparing to transcribe selected audio file...");
             tvResult.setText("");
+            
+            // Store the URI for later use when saving transcription
+            selectedAudioUri = audioUri;
+            String fileName = getFileNameFromUri(audioUri);
+            if (fileName != null) {
+                tvStatus.setText("Transcribing: " + fileName);
+            }
+            
+            // Create temp file for transcription processing
+            File tempFile = createTempAudioFile(audioUri);
+            if (tempFile == null) {
+                Toast.makeText(this, "Failed to process audio file", Toast.LENGTH_SHORT).show();
+                return;
+            }
             
             // Initialize model if needed
             if (mWhisper == null) {
@@ -606,7 +646,7 @@ public class MainActivity extends AppCompatActivity {
             }
             
             // Start transcription using existing Whisper implementation
-            startTranscription(filePath);
+            startTranscription(tempFile.getAbsolutePath());
             
             // Also save the transcription once completed
             if (!mWhisper.isInProgress()) {
@@ -616,8 +656,174 @@ public class MainActivity extends AppCompatActivity {
             }
             
         } catch (Exception e) {
-            Log.e(TAG, "Error processing audio file", e);
+            Log.e(TAG, "Error processing audio file: " + e.getMessage(), e);
             tvStatus.setText("Error: " + e.getMessage());
+        }
+    }
+    
+    // Add a field to store the selected audio URI
+    private Uri selectedAudioUri = null;
+    
+    /**
+     * Save transcription to app's cache directory
+     */
+    private File saveTranscriptionToCache(String transcription) {
+        try {
+            // Create a timestamped file name
+            String timestamp = new java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.US)
+                    .format(new java.util.Date());
+            String fileName = "transcription_" + timestamp + ".txt";
+            
+            File cacheFile = new File(getCacheDir(), fileName);
+            try (FileOutputStream fos = new FileOutputStream(cacheFile)) {
+                fos.write(transcription.getBytes());
+                return cacheFile;
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Error saving transcription to cache", e);
+            return null;
+        }
+    }
+    
+    /**
+     * Share the transcription text using Android's share system
+     */
+    private void shareTranscription(String transcription) {
+        try {
+            // Save to a temporary file for sharing
+            File tempFile = saveTranscriptionToCache(transcription);
+            if (tempFile == null) {
+                Toast.makeText(this, "Failed to prepare transcription for sharing", Toast.LENGTH_SHORT).show();
+                return;
+            }
+            
+            // Get content URI using FileProvider
+            Uri contentUri = FileProvider.getUriForFile(
+                this,
+                "com.whispertflite.fileprovider",
+                tempFile
+            );
+            
+            // Create share intent
+            Intent shareIntent = new Intent(Intent.ACTION_SEND);
+            shareIntent.setType("text/plain");
+            shareIntent.putExtra(Intent.EXTRA_STREAM, contentUri);
+            shareIntent.putExtra(Intent.EXTRA_TEXT, transcription); // Also include as text
+            shareIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            
+            try {
+                startActivity(Intent.createChooser(shareIntent, "Share Transcription"));
+            } catch (ActivityNotFoundException e) {
+                Toast.makeText(this, "No app available to share", Toast.LENGTH_SHORT).show();
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Error sharing transcription", e);
+            Toast.makeText(this, "Error sharing transcription", Toast.LENGTH_SHORT).show();
+        }
+    }
+    
+    /**
+     * Use Storage Access Framework to let user choose where to save the transcription
+     */
+    private void saveTranscriptionWithSaf(Uri sourceAudioUri, String transcription) {
+        try {
+            // Get original file name to create a similar name for transcription
+            String audioFileName = getFileNameFromUri(sourceAudioUri);
+            String transcriptionFileName = "transcription_";
+            
+            if (audioFileName != null) {
+                // Remove extension and add .txt
+                int extensionPos = audioFileName.lastIndexOf(".");
+                if (extensionPos > 0) {
+                    transcriptionFileName = audioFileName.substring(0, extensionPos);
+                } else {
+                    transcriptionFileName = audioFileName;
+                }
+            } else {
+                // Use timestamp if no file name is available
+                String timestamp = new java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.US)
+                        .format(new java.util.Date());
+                transcriptionFileName = "transcription_" + timestamp;
+            }
+            
+            // Add .txt extension
+            if (!transcriptionFileName.endsWith(".txt")) {
+                transcriptionFileName += ".txt";
+            }
+            
+            // Create intent to save a document
+            Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
+            intent.addCategory(Intent.CATEGORY_OPENABLE);
+            intent.setType("text/plain");
+            intent.putExtra(Intent.EXTRA_TITLE, transcriptionFileName);
+            
+            // Try to set initial URI to be the same folder as the audio
+            try {
+                // For content URIs, try to get the parent directory
+                if ("content".equals(sourceAudioUri.getScheme())) {
+                    DocumentFile documentFile = DocumentFile.fromSingleUri(this, sourceAudioUri);
+                    if (documentFile != null && documentFile.getParentFile() != null) {
+                        intent.putExtra(DocumentsContract.EXTRA_INITIAL_URI, 
+                                documentFile.getParentFile().getUri());
+                    }
+                }
+            } catch (Exception e) {
+                Log.w(TAG, "Could not set initial URI: " + e.getMessage());
+                // Continue without setting initial URI
+            }
+            
+            // Store transcription for the callback
+            temporaryTranscription = transcription;
+            
+            // Launch the save dialog
+            saveTranscriptionLauncher.launch(intent);
+            
+        } catch (Exception e) {
+            Log.e(TAG, "Error initiating save with SAF", e);
+            Toast.makeText(this, "Error initiating save: " + e.getMessage(), Toast.LENGTH_SHORT).show();
+        }
+    }
+    
+    // Store transcription temporarily for the save callback
+    private String temporaryTranscription = null;
+    
+    // Add launcher for handling the save document activity result
+    private final ActivityResultLauncher<Intent> saveTranscriptionLauncher =
+            registerForActivityResult(new ActivityResultContracts.StartActivityForResult(),
+                    result -> {
+                        if (result.getResultCode() == RESULT_OK && result.getData() != null) {
+                            Uri saveUri = result.getData().getData();
+                            if (saveUri != null && temporaryTranscription != null) {
+                                saveTranscriptionToUri(saveUri, temporaryTranscription);
+                            }
+                        } else {
+                            Toast.makeText(this, "Transcription save cancelled", Toast.LENGTH_SHORT).show();
+                        }
+                        temporaryTranscription = null; // Clear the temporary storage
+                    });
+    
+    /**
+     * Actually save the transcription to the selected URI
+     */
+    private void saveTranscriptionToUri(Uri uri, String transcription) {
+        try {
+            try (OutputStream outputStream = getContentResolver().openOutputStream(uri)) {
+                if (outputStream != null) {
+                    outputStream.write(transcription.getBytes());
+                    outputStream.flush();
+                    Toast.makeText(this, "Transcription saved successfully", Toast.LENGTH_SHORT).show();
+                    
+                    // Show the save location
+                    new AlertDialog.Builder(this)
+                        .setTitle("Transcription Saved")
+                        .setMessage("The transcription has been saved. You can find it in your file manager where you selected to save it.")
+                        .setPositiveButton("OK", null)
+                        .show();
+                }
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Error saving transcription to URI", e);
+            Toast.makeText(this, "Error saving transcription: " + e.getMessage(), Toast.LENGTH_SHORT).show();
         }
     }
     
