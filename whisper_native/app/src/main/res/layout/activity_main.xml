@@ -154,4 +154,16 @@
         android:layout_gravity="center_horizontal"
         android:layout_marginTop="16dp" />
 
+    <!-- Add info text about audio format requirements -->
+    <TextView
+        android:id="@+id/tvAudioFormatInfo"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Note: Audio should be 16kHz mono 16-bit format for best results. Other formats will be converted automatically."
+        android:textSize="12sp"
+        android:textStyle="italic"
+        android:textColor="#757575"
+        android:layout_marginTop="4dp"
+        android:layout_marginBottom="8dp"/>
+
 </LinearLayout>

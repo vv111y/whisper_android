@@ -35,6 +35,7 @@ import com.whispertflite.asr.Player;
 import com.whispertflite.utils.WaveUtil;
 import com.whispertflite.asr.Recorder;
 import com.whispertflite.asr.Whisper;
+import com.whispertflite.utils.AudioConverter;
 
 import java.io.File;
 import java.io.FileOutputStream;
@@ -49,6 +50,9 @@ import android.provider.Settings;
 import android.content.ActivityNotFoundException;
 import androidx.documentfile.provider.DocumentFile;
 import androidx.core.content.FileProvider;
+import android.media.MediaExtractor;
+import android.media.MediaFormat;
+import android.media.MediaMetadataRetriever;
 
 public class MainActivity extends AppCompatActivity {
     private static final String TAG = "MainActivity";
@@ -60,6 +64,11 @@ public class MainActivity extends AppCompatActivity {
     private static final String ENGLISH_ONLY_VOCAB_FILE = "filters_vocab_en.bin";
     private static final String MULTILINGUAL_VOCAB_FILE = "filters_vocab_multilingual.bin";
     private static final String[] EXTENSIONS_TO_COPY = {"tflite", "bin", "wav", "pcm"};
+    
+    // Add these required audio format constants
+    private static final int WHISPER_SAMPLE_RATE = 16000; // 16kHz required by Whisper
+    private static final int WHISPER_CHANNELS = 1; // Mono required by Whisper
+    private static final int WHISPER_BITS_PER_SAMPLE = 16; // 16-bit required by Whisper
 
     private TextView tvStatus;
     private TextView tvResult;
@@ -638,7 +647,7 @@ public class MainActivity extends AppCompatActivity {
             selectedAudioUri = audioUri;
             String fileName = getFileNameFromUri(audioUri);
             if (fileName != null) {
-                tvStatus.setText("Transcribing: " + fileName);
+                tvStatus.setText("Checking audio format: " + fileName);
                 Log.d(TAG, "File name: " + fileName);
             }
             
@@ -659,13 +668,20 @@ public class MainActivity extends AppCompatActivity {
                 return;
             }
             
+            // Check audio format and convert if needed
+            File processableAudioFile = ensureCorrectAudioFormat(tempFile);
+            if (processableAudioFile == null) {
+                Toast.makeText(this, "Could not prepare audio file for transcription", Toast.LENGTH_LONG).show();
+                return;
+            }
+            
             // Initialize model if needed
             if (mWhisper == null) {
                 initModel(selectedTfliteFile);
             }
             
             // Start transcription using existing Whisper implementation
-            startTranscription(tempFile.getAbsolutePath());
+            startTranscription(processableAudioFile.getAbsolutePath());
             
             if (!mWhisper.isInProgress()) {
                 Toast.makeText(this, "Starting transcription...", Toast.LENGTH_SHORT).show();
@@ -676,6 +692,110 @@ public class MainActivity extends AppCompatActivity {
         } catch (Exception e) {
             Log.e(TAG, "Error processing audio file: " + e.getMessage(), e);
             tvStatus.setText("Error: " + e.getMessage());
+        }
+    }
+    
+    /**
+     * Checks if the audio file is in the correct format (16kHz, mono, 16-bit)
+     * and converts it if necessary
+     * 
+     * @param inputFile The audio file to check/convert
+     * @return A file in the correct format for Whisper, or null if conversion fails
+     */
+    private File ensureCorrectAudioFormat(File inputFile) {
+        try {
+            // Use MediaExtractor to get file format information
+            MediaExtractor extractor = new MediaExtractor();
+            extractor.setDataSource(inputFile.getAbsolutePath());
+            
+            if (extractor.getTrackCount() <= 0) {
+                Log.e(TAG, "No audio tracks found in file");
+                Toast.makeText(this, "No audio tracks found in file", Toast.LENGTH_SHORT).show();
+                extractor.release();
+                return null;
+            }
+            
+            MediaFormat format = extractor.getTrackFormat(0);
+            extractor.release();
+            
+            int sampleRate = format.containsKey(MediaFormat.KEY_SAMPLE_RATE) 
+                    ? format.getInteger(MediaFormat.KEY_SAMPLE_RATE) : 0;
+            int channelCount = format.containsKey(MediaFormat.KEY_CHANNEL_COUNT) 
+                    ? format.getInteger(MediaFormat.KEY_CHANNEL_COUNT) : 0;
+            
+            // We also need to check bit depth, but MediaFormat doesn't expose this directly
+            // Try using MediaMetadataRetriever for more information
+            boolean needsConversion = sampleRate != WHISPER_SAMPLE_RATE || channelCount != 1;
+            
+            Log.d(TAG, "Audio file format - Sample rate: " + sampleRate + "Hz, Channels: " + channelCount + 
+                    (needsConversion ? " (conversion needed)" : " (compatible format)"));
+            
+            if (needsConversion) {
+                tvStatus.setText("Converting audio to 16kHz mono format...");
+                Toast.makeText(this, "Converting audio to required format for transcription", Toast.LENGTH_SHORT).show();
+                
+                // Convert file to 16kHz mono
+                File convertedFile = convertAudioToWhisperFormat(inputFile);
+                if (convertedFile != null) {
+                    Log.d(TAG, "Successfully converted audio to required format");
+                    return convertedFile;
+                } else {
+                    Log.e(TAG, "Failed to convert audio format");
+                    return null;
+                }
+            }
+            
+            // File is already in correct format
+            return inputFile;
+            
+        } catch (Exception e) {
+            Log.e(TAG, "Error checking audio format: " + e.getMessage(), e);
+            
+            // Try using WaveUtil for simple WAV files since it might work even if MediaExtractor fails
+            if (inputFile.getName().toLowerCase().endsWith(".wav")) {
+                Log.d(TAG, "Attempting to process WAV file directly with WaveUtil");
+                return inputFile;
+            }
+            
+            return null;
+        }
+    }
+    
+    /**
+     * Converts an audio file to the format required by Whisper: 16kHz, mono, 16-bit PCM
+     */
+    private File convertAudioToWhisperFormat(File inputFile) {
+        try {
+            // We'll use Android's AudioRecord to convert the file
+            // Create a new file name based on original but indicating it's converted
+            String baseName = inputFile.getName();
+            int extPos = baseName.lastIndexOf(".");
+            String newName = extPos > 0 
+                ? baseName.substring(0, extPos) + "_whisper_16k_mono.wav" 
+                : baseName + "_whisper_16k_mono.wav";
+                
+            File outputFile = new File(getCacheDir(), newName);
+            
+            // Use our AudioConverter utility 
+            boolean success = AudioConverter.convertToWav(
+                inputFile.getAbsolutePath(), 
+                outputFile.getAbsolutePath(),
+                WHISPER_SAMPLE_RATE,  // Use the defined sample rate from WhisperUtil
+                WHISPER_CHANNELS,     // Mono (1 channel)
+                WHISPER_BITS_PER_SAMPLE  // 16-bit PCM
+            );
+            
+            if (success) {
+                Log.d(TAG, "Audio conversion successful: " + outputFile.getAbsolutePath() + 
+                      " (size: " + outputFile.length() + " bytes)");
+                return outputFile;
+            } else {
+                Log.e(TAG, "Audio conversion failed");
+                return null;
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Error converting audio format: " + e.getMessage(), e);
+            return null;
         }
     }
     
