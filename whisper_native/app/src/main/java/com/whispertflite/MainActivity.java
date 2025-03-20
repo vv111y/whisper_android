@@ -614,10 +614,18 @@ public class MainActivity extends AppCompatActivity {
 
     private void processAudioFile(Uri audioUri) {
         try {
+            if (audioUri == null) {
+                Toast.makeText(this, "Invalid audio file selected", Toast.LENGTH_SHORT).show();
+                return;
+            }
+            
+            Log.d(TAG, "Processing audio file: " + audioUri.toString());
+            
             // Take persistent permission for future access
             try {
                 getContentResolver().takePersistableUriPermission(audioUri, 
                     Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                Log.d(TAG, "Took persistent permission for URI");
             } catch (SecurityException e) {
                 Log.w(TAG, "Could not take persistable permission: " + e.getMessage());
                 // Continue anyway as we already have the URI
@@ -631,12 +639,23 @@ public class MainActivity extends AppCompatActivity {
             String fileName = getFileNameFromUri(audioUri);
             if (fileName != null) {
                 tvStatus.setText("Transcribing: " + fileName);
+                Log.d(TAG, "File name: " + fileName);
             }
             
             // Create temp file for transcription processing
             File tempFile = createTempAudioFile(audioUri);
             if (tempFile == null) {
+                Log.e(TAG, "Failed to create temp audio file");
                 Toast.makeText(this, "Failed to process audio file", Toast.LENGTH_SHORT).show();
+                return;
+            }
+            
+            Log.d(TAG, "Created temp file: " + tempFile.getAbsolutePath() + " (size: " + tempFile.length() + " bytes)");
+            
+            // Verify the temp file exists and has content
+            if (!tempFile.exists() || tempFile.length() == 0) {
+                Log.e(TAG, "Temp file is empty or doesn't exist");
+                Toast.makeText(this, "Error: Created file is empty", Toast.LENGTH_SHORT).show();
                 return;
             }
             
@@ -648,7 +667,6 @@ public class MainActivity extends AppCompatActivity {
             // Start transcription using existing Whisper implementation
             startTranscription(tempFile.getAbsolutePath());
             
-            // Also save the transcription once completed
             if (!mWhisper.isInProgress()) {
                 Toast.makeText(this, "Starting transcription...", Toast.LENGTH_SHORT).show();
             } else {
@@ -727,6 +745,25 @@ public class MainActivity extends AppCompatActivity {
      */
     private void saveTranscriptionWithSaf(Uri sourceAudioUri, String transcription) {
         try {
+            // Add null check for sourceAudioUri
+            if (sourceAudioUri == null) {
+                Log.e(TAG, "Cannot save transcription: source audio URI is null");
+                // Fall back to using a timestamp for the filename
+                String timestamp = new java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.US)
+                        .format(new java.util.Date());
+                String transcriptionFileName = "transcription_" + timestamp + ".txt";
+                
+                // Create intent to save a document
+                Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
+                intent.addCategory(Intent.CATEGORY_OPENABLE);
+                intent.setType("text/plain");
+                intent.putExtra(Intent.EXTRA_TITLE, transcriptionFileName);
+                
+                temporaryTranscription = transcription;
+                saveTranscriptionLauncher.launch(intent);
+                return;
+            }
+            
             // Get original file name to create a similar name for transcription
             String audioFileName = getFileNameFromUri(sourceAudioUri);
             String transcriptionFileName = "transcription_";
@@ -780,7 +817,159 @@ public class MainActivity extends AppCompatActivity {
             
         } catch (Exception e) {
             Log.e(TAG, "Error initiating save with SAF", e);
-            Toast.makeText(this, "Error initiating save: " + e.getMessage(), Toast.LENGTH_SHORT).show();
+            // Handle the error more gracefully with a fallback method
+            try {
+                // Use a basic method as fallback
+                String timestamp = new java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.US)
+                        .format(new java.util.Date());
+                String transcriptionFileName = "transcription_" + timestamp + ".txt";
+                
+                Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
+                intent.addCategory(Intent.CATEGORY_OPENABLE);
+                intent.setType("text/plain");
+                intent.putExtra(Intent.EXTRA_TITLE, transcriptionFileName);
+                
+                temporaryTranscription = transcription;
+                saveTranscriptionLauncher.launch(intent);
+            } catch (Exception fallbackError) {
+                // Last resort - just share the transcription if we can't save it
+                Log.e(TAG, "Fallback save also failed: " + fallbackError.getMessage());
+                Toast.makeText(this, "Error initiating save. Attempting to share instead.", Toast.LENGTH_SHORT).show();
+                shareTranscription(transcription);
+            }
+        }
+    }
+    
+    private String getFileNameFromUri(Uri uri) {
+        // Add null check for uri
+        if (uri == null) {
+            Log.w(TAG, "getFileNameFromUri called with null URI");
+            return null;
+        }
+        
+        String result = null;
+        try {
+            if ("content".equals(uri.getScheme())) {
+                try (Cursor cursor = getContentResolver().query(uri, null, null, null, null)) {
+                    if (cursor != null && cursor.moveToFirst()) {
+                        int nameIndex = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_DISPLAY_NAME);
+                        if (nameIndex >= 0) {
+                            result = cursor.getString(nameIndex);
+                        }
+                    }
+                }
+            } else if ("file".equals(uri.getScheme())) {
+                result = uri.getPath();
+                int cut = result.lastIndexOf('/');
+                if (cut != -1) {
+                    result = result.substring(cut + 1);
+                }
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Error getting filename from URI: " + e.getMessage(), e);
+        }
+        
+        // If we couldn't get a filename, generate one based on timestamp
+        if (result == null) {
+            String timestamp = new java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.US)
+                    .format(new java.util.Date());
+            result = "audio_" + timestamp;
+        }
+        
+        return result;
+    }
+    
+    private String getPathFromUri(Uri uri) {
+        Log.d(TAG, "Getting path from URI: " + uri.toString());
+        
+        // Handle different URI schemes
+        if ("content".equals(uri.getScheme())) {
+            // Try to get the actual file path for newer Android versions
+            try {
+                String[] projection = { MediaStore.Audio.Media.DATA };
+                Cursor cursor = getContentResolver().query(uri, projection, null, null, null);
+                if (cursor != null && cursor.moveToFirst()) {
+                    int columnIndex = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DATA);
+                    String path = cursor.getString(columnIndex);
+                    cursor.close();
+                    Log.d(TAG, "Found path via MediaStore: " + path);
+                    return path;
+                }
+            } catch (Exception e) {
+                Log.w(TAG, "Error getting file path from MediaStore: " + e.getMessage());
+                // Continue to other methods if this fails
+            }
+            
+            // Fall back to temp file creation method
+            return null;
+        } else if ("file".equals(uri.getScheme())) {
+            return uri.getPath();
+        }
+        
+        return null;
+    }
+    
+    private File createTempAudioFile(Uri uri) throws IOException {
+        if (uri == null) {
+            Log.e(TAG, "createTempAudioFile: URI is null");
+            return null;
+        }
+        
+        InputStream inputStream = null;
+        FileOutputStream outputStream = null;
+        try {
+            inputStream = getContentResolver().openInputStream(uri);
+            if (inputStream == null) {
+                Log.e(TAG, "Failed to open input stream for URI: " + uri);
+                return null;
+            }
+            
+            String fileName = getFileNameFromUri(uri);
+            if (fileName == null) fileName = "temp_audio_" + System.currentTimeMillis();
+            
+            // Make sure we have a proper extension
+            if (!fileName.toLowerCase().endsWith(".wav") && 
+                !fileName.toLowerCase().endsWith(".mp3") && 
+                !fileName.toLowerCase().endsWith(".m4a")) {
+                fileName += ".wav"; // Default to WAV if no recognized extension
+            }
+            
+            File outputDir = getCacheDir();
+            File outputFile = new File(outputDir, fileName);
+            
+            outputStream = new FileOutputStream(outputFile);
+            
+            byte[] buffer = new byte[8 * 1024]; // Larger buffer for faster copying
+            int read;
+            long totalBytes = 0;
+            while ((read = inputStream.read(buffer)) != -1) {
+                outputStream.write(buffer, 0, read);
+                totalBytes += read;
+            }
+            outputStream.flush();
+            
+            Log.d(TAG, "Copied audio file to temp location: " + outputFile.getAbsolutePath() + 
+                     " (size: " + totalBytes + " bytes)");
+            
+            return outputFile;
+        } catch (IOException e) {
+            Log.e(TAG, "Error creating temp audio file: " + e.getMessage(), e);
+            throw e;
+        } finally {
+            if (inputStream != null) {
+                try {
+                    inputStream.close();
+                } catch (IOException e) {
+                    Log.e(TAG, "Error closing input stream", e);
+                }
+            }
+            if (outputStream != null) {
+                try {
+                    outputStream.close();
+                } catch (IOException e) {
+                    Log.e(TAG, "Error closing output stream", e);
+                }
+            }
         }
     }
     
@@ -827,81 +1016,6 @@ public class MainActivity extends AppCompatActivity {
         }
     }
     
-    private String getPathFromUri(Uri uri) {
-        Log.d(TAG, "Getting path from URI: " + uri.toString());
-        
-        // Handle different URI schemes
-        if ("content".equals(uri.getScheme())) {
-            // Try to get the actual file path for newer Android versions
-            try {
-                String[] projection = { MediaStore.Audio.Media.DATA };
-                Cursor cursor = getContentResolver().query(uri, projection, null, null, null);
-                if (cursor != null && cursor.moveToFirst()) {
-                    int columnIndex = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DATA);
-                    String path = cursor.getString(columnIndex);
-                    cursor.close();
-                    Log.d(TAG, "Found path via MediaStore: " + path);
-                    return path;
-                }
-            } catch (Exception e) {
-                Log.w(TAG, "Error getting file path from MediaStore: " + e.getMessage());
-                // Continue to other methods if this fails
-            }
-            
-            // Fall back to temp file creation method
-            return null;
-        } else if ("file".equals(uri.getScheme())) {
-            return uri.getPath();
-        }
-        
-        return null;
-    }
-    
-    private File createTempAudioFile(Uri uri) throws IOException {
-        InputStream inputStream = getContentResolver().openInputStream(uri);
-        if (inputStream == null) return null;
-        
-        String fileName = getFileNameFromUri(uri);
-        if (fileName == null) fileName = "temp_audio";
-        
-        File outputDir = getCacheDir();
-        File outputFile = new File(outputDir, fileName);
-        
-        try (OutputStream outputStream = new FileOutputStream(outputFile)) {
-            byte[] buffer = new byte[4 * 1024]; // 4k buffer
-            int read;
-            while ((read = inputStream.read(buffer)) != -1) {
-                outputStream.write(buffer, 0, read);
-            }
-            outputStream.flush();
-            return outputFile;
-        } finally {
-            inputStream.close();
-        }
-    }
-    
-    private String getFileNameFromUri(Uri uri) {
-        String result = null;
-        if (uri.getScheme().equals("content")) {
-            try (Cursor cursor = getContentResolver().query(uri, null, null, null, null)) {
-                if (cursor != null && cursor.moveToFirst()) {
-                    int nameIndex = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_DISPLAY_NAME);
-                    if (nameIndex >= 0) {
-                        result = cursor.getString(nameIndex);
-                    }
-                }
-            }
-        }
-        if (result == null) {
-            result = uri.getPath();
-            int cut = result.lastIndexOf('/');
-            if (cut != -1) {
-                result = result.substring(cut + 1);
-            }
-        }
-        return result;
-    }
-    
     private String saveTranscriptionToFile(String audioFilePath, String transcription) {
         try {
             // Create output file path with same name but .txt extension
@@ -917,6 +1031,19 @@ public class MainActivity extends AppCompatActivity {
             Log.e(TAG, "Error saving transcription", e);
             return null;
         }
+    }
+
+    // Add a method to check if the transcription is empty and handle it
+    private boolean handleEmptyTranscription(String result, String filePath) {
+        if (result == null || result.trim().isEmpty()) {
+            Log.w(TAG, "Empty transcription result for file: " + filePath);
+            handler.post(() -> {
+                tvResult.setText("No transcription generated. The audio file may be empty, corrupted, or in an unsupported format.");
+                Toast.makeText(this, "No transcription could be generated", Toast.LENGTH_LONG).show();
+            });
+            return true;
+        }
+        return false;
     }
 
     // Test code for parallel processing

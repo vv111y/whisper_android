@@ -138,24 +138,45 @@ public class Whisper {
             if (mWhisperEngine.isInitialized() && mWavFilePath != null) {
                 File waveFile = new File(mWavFilePath);
                 if (waveFile.exists()) {
+                    if (waveFile.length() == 0) {
+                        Log.e(TAG, "Audio file exists but is empty: " + mWavFilePath);
+                        sendUpdate("Audio file is empty");
+                        sendResult(""); // Send empty result to trigger proper handling
+                        mInProgress.set(false);
+                        return;
+                    }
+                    
                     long startTime = System.currentTimeMillis();
                     sendUpdate(MSG_PROCESSING);
 
                     String result = null;
                     synchronized (mWhisperEngine) {
                         if (mAction == Action.TRANSCRIBE) {
-                            result = mWhisperEngine.transcribeFile(mWavFilePath);
+                            try {
+                                result = mWhisperEngine.transcribeFile(mWavFilePath);
+                                Log.d(TAG, "Transcription complete. Result length: " + 
+                                        (result != null ? result.length() : "null"));
+                            } catch (Exception e) {
+                                Log.e(TAG, "Error during transcription engine call", e);
+                                result = "Error transcribing: " + e.getMessage();
+                            }
                         } else {
-//                            result = mWhisperEngine.getTranslation(mWavFilePath);
                             Log.d(TAG, "TRANSLATE feature is not implemented");
                         }
                     }
+                    
+                    // Handle potentially null result
+                    if (result == null) {
+                        result = ""; // Convert null to empty string to avoid NullPointerException
+                    }
+                    
                     sendResult(result);
 
                     long timeTaken = System.currentTimeMillis() - startTime;
                     Log.d(TAG, "Time Taken for transcription: " + timeTaken + "ms");
                     sendUpdate(MSG_PROCESSING_DONE);
                 } else {
+                    Log.e(TAG, "Audio file does not exist: " + mWavFilePath);
                     sendUpdate(MSG_FILE_NOT_FOUND);
                 }
             } else {
