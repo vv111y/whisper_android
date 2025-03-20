@@ -89,6 +89,11 @@ public class Whisper {
         this.mWavFilePath = wavFile;
     }
 
+    // Add getter for file path
+    public String getFilePath() {
+        return mWavFilePath;
+    }
+
     public void start() {
         if (!mInProgress.compareAndSet(false, true)) {
             Log.d(TAG, "Execution is already in progress...");

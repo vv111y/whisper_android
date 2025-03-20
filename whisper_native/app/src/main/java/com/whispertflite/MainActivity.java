@@ -4,11 +4,16 @@ import android.Manifest;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
+import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.content.res.AssetManager;
+import android.database.Cursor;
+import android.net.Uri;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.provider.DocumentsContract;
+import android.provider.MediaStore;
 import android.util.Log;
 import android.view.View;
 import android.view.ViewGroup;
@@ -17,7 +22,10 @@ import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.Spinner;
 import android.widget.TextView;
+import android.widget.Toast;
 
+import androidx.activity.result.ActivityResultLauncher;
+import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.annotation.NonNull;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.content.ContextCompat;
@@ -34,6 +42,10 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.util.ArrayList;
+
+import android.app.AlertDialog;
+import android.os.Build;
+import android.provider.Settings;
 
 public class MainActivity extends AppCompatActivity {
     private static final String TAG = "MainActivity";
@@ -65,6 +77,30 @@ public class MainActivity extends AppCompatActivity {
     private final boolean loopTesting = false;
     private final SharedResource transcriptionSync = new SharedResource();
     private final Handler handler = new Handler(Looper.getMainLooper());
+
+    // Add these new fields for file selection
+    private final ActivityResultLauncher<String[]> requestPermissionLauncher =
+            registerForActivityResult(new ActivityResultContracts.RequestMultiplePermissions(), permissions -> {
+                boolean allGranted = true;
+                for (Boolean isGranted : permissions.values()) {
+                    allGranted = allGranted && isGranted;
+                }
+                if (allGranted) {
+                    openAudioFilePicker();
+                } else {
+                    // Show dialog with option to go to settings
+                    showPermissionExplanationDialog();
+                }
+            });
+
+    private final ActivityResultLauncher<Intent> selectAudioLauncher =
+            registerForActivityResult(new ActivityResultContracts.StartActivityForResult(),
+                    result -> {
+                        if (result.getResultCode() == RESULT_OK && result.getData() != null) {
+                            Uri audioUri = result.getData().getData();
+                            processAudioFile(audioUri);
+                        }
+                    });
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -228,6 +264,10 @@ public class MainActivity extends AppCompatActivity {
         // Assume this Activity is the current activity, check record permission
         checkRecordPermission();
 
+        // Add this new button handler
+        Button btnSelectAudio = findViewById(R.id.btnSelectAudio);
+        btnSelectAudio.setOnClickListener(v -> checkPermissionsAndOpenFilePicker());
+
         // for debugging
 //        testParallelProcessing();
     }
@@ -267,6 +307,16 @@ public class MainActivity extends AppCompatActivity {
 
                 Log.d(TAG, "Result: " + result);
                 handler.post(() -> tvResult.append(result));
+                
+                // If we just transcribed a file that was selected via the file picker,
+                // also save the transcription to a text file
+                if (mWhisper.getFilePath() != null && !mWhisper.getFilePath().equals(selectedWaveFile.getAbsolutePath())) {
+                    String textFilePath = saveTranscriptionToFile(mWhisper.getFilePath(), result);
+                    if (textFilePath != null) {
+                        handler.post(() -> Toast.makeText(MainActivity.this, 
+                                "Transcription saved to: " + textFilePath, Toast.LENGTH_LONG).show());
+                    }
+                }
             }
         });
     }
@@ -426,6 +476,240 @@ public class MainActivity extends AppCompatActivity {
         // Synchronized method for Thread 2 to send a signal
         public synchronized void sendSignal() {
             notify();  // Notifies the waiting thread
+        }
+    }
+
+    // Add these methods for file selection and processing
+    private void checkPermissionsAndOpenFilePicker() {
+        // For Android 13+ (API 33+), we need READ_MEDIA_AUDIO permission
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_MEDIA_AUDIO) 
+                    == PackageManager.PERMISSION_GRANTED) {
+                openAudioFilePicker();
+            } else {
+                boolean shouldShowRationale = shouldShowRequestPermissionRationale(Manifest.permission.READ_MEDIA_AUDIO);
+                
+                if (!shouldShowRationale) {
+                    // User selected "Don't ask again" - direct to settings
+                    showPermissionExplanationDialog();
+                } else {
+                    // Request the permission
+                    requestPermissionLauncher.launch(new String[]{Manifest.permission.READ_MEDIA_AUDIO});
+                }
+            }
+        } 
+        // For Android 10-12 (API 29-32)
+        else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_EXTERNAL_STORAGE) 
+                    == PackageManager.PERMISSION_GRANTED) {
+                openAudioFilePicker();
+            } else {
+                boolean shouldShowRationale = shouldShowRequestPermissionRationale(Manifest.permission.READ_EXTERNAL_STORAGE);
+                
+                if (!shouldShowRationale) {
+                    showPermissionExplanationDialog();
+                } else {
+                    requestPermissionLauncher.launch(new String[]{Manifest.permission.READ_EXTERNAL_STORAGE});
+                }
+            }
+        }
+        // For older Android versions (below API 29)
+        else {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_EXTERNAL_STORAGE) 
+                    == PackageManager.PERMISSION_GRANTED &&
+                ContextCompat.checkSelfPermission(this, Manifest.permission.WRITE_EXTERNAL_STORAGE) 
+                    == PackageManager.PERMISSION_GRANTED) {
+                openAudioFilePicker();
+            } else {
+                boolean shouldShowReadRationale = shouldShowRequestPermissionRationale(Manifest.permission.READ_EXTERNAL_STORAGE);
+                boolean shouldShowWriteRationale = shouldShowRequestPermissionRationale(Manifest.permission.WRITE_EXTERNAL_STORAGE);
+                
+                if (!shouldShowReadRationale && !shouldShowWriteRationale) {
+                    showPermissionExplanationDialog();
+                } else {
+                    requestPermissionLauncher.launch(new String[]{
+                            Manifest.permission.READ_EXTERNAL_STORAGE,
+                            Manifest.permission.WRITE_EXTERNAL_STORAGE
+                    });
+                }
+            }
+        }
+    }
+
+    /**
+     * Shows a dialog explaining why storage permissions are needed
+     * and offers option to go to app settings
+     */
+    private void showPermissionExplanationDialog() {
+        new AlertDialog.Builder(this)
+                .setTitle("Storage Permission Required")
+                .setMessage("This app needs permission to access audio files on your device. Please enable the 'Files and media' or 'Music and audio' permission in app settings.")
+                .setPositiveButton("Go to Settings", (dialog, which) -> {
+                    openAppSettings();
+                })
+                .setNegativeButton("Cancel", (dialog, which) -> {
+                    Toast.makeText(this, "Storage access permission is required to select audio files", Toast.LENGTH_LONG).show();
+                })
+                .setCancelable(false)
+                .show();
+    }
+
+    /**
+     * Opens the app settings page where user can grant permissions
+     */
+    private void openAppSettings() {
+        Intent intent = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS);
+        Uri uri = Uri.fromParts("package", getPackageName(), null);
+        intent.setData(uri);
+        startActivity(intent);
+        Toast.makeText(this, "Please enable storage permissions", Toast.LENGTH_LONG).show();
+    }
+
+    private void openAudioFilePicker() {
+        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.setType("audio/*");
+        // Add these flags to ensure we can read the file later and keep access
+        intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        intent.addFlags(Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
+        selectAudioLauncher.launch(intent);
+    }
+
+    private void processAudioFile(Uri audioUri) {
+        try {
+            // Take persistent permission for future access
+            getContentResolver().takePersistableUriPermission(audioUri, 
+                Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                
+            // Get file path from URI (try modern content resolver approach first)
+            String filePath = getPathFromUri(audioUri);
+            
+            // If direct path retrieval fails or returns null, use the URI directly
+            if (filePath == null) {
+                Log.d(TAG, "Creating temporary file from URI");
+                File tempFile = createTempAudioFile(audioUri);
+                if (tempFile != null) {
+                    filePath = tempFile.getAbsolutePath();
+                } else {
+                    Toast.makeText(this, "Failed to process audio file", Toast.LENGTH_SHORT).show();
+                    return;
+                }
+            }
+            
+            // Prepare for transcription
+            tvStatus.setText("Preparing to transcribe selected audio file...");
+            tvResult.setText("");
+            
+            // Initialize model if needed
+            if (mWhisper == null) {
+                initModel(selectedTfliteFile);
+            }
+            
+            // Start transcription using existing Whisper implementation
+            startTranscription(filePath);
+            
+            // Also save the transcription once completed
+            if (!mWhisper.isInProgress()) {
+                Toast.makeText(this, "Starting transcription...", Toast.LENGTH_SHORT).show();
+            } else {
+                Toast.makeText(this, "Transcription already in progress", Toast.LENGTH_SHORT).show();
+            }
+            
+        } catch (Exception e) {
+            Log.e(TAG, "Error processing audio file", e);
+            tvStatus.setText("Error: " + e.getMessage());
+        }
+    }
+    
+    private String getPathFromUri(Uri uri) {
+        Log.d(TAG, "Getting path from URI: " + uri.toString());
+        
+        // Handle different URI schemes
+        if ("content".equals(uri.getScheme())) {
+            // Try to get the actual file path for newer Android versions
+            try {
+                String[] projection = { MediaStore.Audio.Media.DATA };
+                Cursor cursor = getContentResolver().query(uri, projection, null, null, null);
+                if (cursor != null && cursor.moveToFirst()) {
+                    int columnIndex = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DATA);
+                    String path = cursor.getString(columnIndex);
+                    cursor.close();
+                    Log.d(TAG, "Found path via MediaStore: " + path);
+                    return path;
+                }
+            } catch (Exception e) {
+                Log.w(TAG, "Error getting file path from MediaStore: " + e.getMessage());
+                // Continue to other methods if this fails
+            }
+            
+            // Fall back to temp file creation method
+            return null;
+        } else if ("file".equals(uri.getScheme())) {
+            return uri.getPath();
+        }
+        
+        return null;
+    }
+    
+    private File createTempAudioFile(Uri uri) throws IOException {
+        InputStream inputStream = getContentResolver().openInputStream(uri);
+        if (inputStream == null) return null;
+        
+        String fileName = getFileNameFromUri(uri);
+        if (fileName == null) fileName = "temp_audio";
+        
+        File outputDir = getCacheDir();
+        File outputFile = new File(outputDir, fileName);
+        
+        try (OutputStream outputStream = new FileOutputStream(outputFile)) {
+            byte[] buffer = new byte[4 * 1024]; // 4k buffer
+            int read;
+            while ((read = inputStream.read(buffer)) != -1) {
+                outputStream.write(buffer, 0, read);
+            }
+            outputStream.flush();
+            return outputFile;
+        } finally {
+            inputStream.close();
+        }
+    }
+    
+    private String getFileNameFromUri(Uri uri) {
+        String result = null;
+        if (uri.getScheme().equals("content")) {
+            try (Cursor cursor = getContentResolver().query(uri, null, null, null, null)) {
+                if (cursor != null && cursor.moveToFirst()) {
+                    int nameIndex = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_DISPLAY_NAME);
+                    if (nameIndex >= 0) {
+                        result = cursor.getString(nameIndex);
+                    }
+                }
+            }
+        }
+        if (result == null) {
+            result = uri.getPath();
+            int cut = result.lastIndexOf('/');
+            if (cut != -1) {
+                result = result.substring(cut + 1);
+            }
+        }
+        return result;
+    }
+    
+    private String saveTranscriptionToFile(String audioFilePath, String transcription) {
+        try {
+            // Create output file path with same name but .txt extension
+            String textFilePath = audioFilePath.substring(0, audioFilePath.lastIndexOf('.')) + ".txt";
+            File textFile = new File(textFilePath);
+            
+            // Write transcription to file
+            try (FileOutputStream fos = new FileOutputStream(textFile)) {
+                fos.write(transcription.getBytes());
+                return textFilePath;
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Error saving transcription", e);
+            return null;
         }
     }
 
