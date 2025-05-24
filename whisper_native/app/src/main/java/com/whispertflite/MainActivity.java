@@ -320,48 +320,21 @@ public class MainActivity extends AppCompatActivity {
                 Log.d(TAG, "Result: " + result);
                 handler.post(() -> tvResult.append(result));
                 
-                // Always save to cache first
+                // Always save to cache first (for sharing functionality)
                 File cachedTranscription = saveTranscriptionToCache(result);
                 
                 // If we're processing a selected file (not from the dropdown)
                 if (selectedAudioUri != null) {
-                    handler.post(() -> {
-                        // Show dialog with options for the transcription
-                        new AlertDialog.Builder(MainActivity.this)
-                            .setTitle("Transcription Complete")
-                            .setMessage("What would you like to do with the transcription?")
-                            .setPositiveButton("Share", (dialog, which) -> {
-                                shareTranscription(result);
-                            })
-                            .setNegativeButton("Save", (dialog, which) -> {
-                                saveTranscriptionWithSaf(selectedAudioUri, result);
-                            })
-                            .setNeutralButton("Close", null)
-                            .show();
-                        
-                        // Reset the selected URI
-                        selectedAudioUri = null;
-                    });
+                    // Show dialog with options for the transcription
+                    handler.post(() -> showTranscriptionOptionsDialog(selectedAudioUri, result));
                 }
-                // If we're processing a file from the dropdown
+                // If we're processing a file from the dropdown (built-in files)
                 else if (mWhisper.getFilePath() != null) {
-                    String textFilePath = saveTranscriptionToFile(mWhisper.getFilePath(), result);
-                    if (textFilePath != null) {
-                        handler.post(() -> {
-                            String message = "Transcription saved to: " + textFilePath;
-                            Toast.makeText(MainActivity.this, message, Toast.LENGTH_LONG).show();
-                            
-                            // Offer to share this transcription too
-                            new AlertDialog.Builder(MainActivity.this)
-                                .setTitle("Share Transcription?")
-                                .setMessage("Would you like to share this transcription?")
-                                .setPositiveButton("Share", (dialog, which) -> {
-                                    shareTranscription(result);
-                                })
-                                .setNegativeButton("No", null)
-                                .show();
-                        });
-                    }
+                    // Instead of saving directly to app storage, prompt user for save location
+                    String wavFileName = new File(mWhisper.getFilePath()).getName();
+                    String suggestedName = wavFileName.substring(0, wavFileName.lastIndexOf('.')) + ".txt";
+                    
+                    handler.post(() -> showTranscriptionOptionsDialog(null, result, suggestedName));
                 }
             }
         });
@@ -862,50 +835,39 @@ public class MainActivity extends AppCompatActivity {
     
     /**
      * Use Storage Access Framework to let user choose where to save the transcription
+     * Modified to work with both URI sources and internal files
      */
-    private void saveTranscriptionWithSaf(Uri sourceAudioUri, String transcription) {
+    private void saveTranscriptionWithSaf(Uri sourceAudioUri, String transcription, String suggestedFileName) {
         try {
-            // Add null check for sourceAudioUri
-            if (sourceAudioUri == null) {
-                Log.e(TAG, "Cannot save transcription: source audio URI is null");
-                // Fall back to using a timestamp for the filename
-                String timestamp = new java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.US)
-                        .format(new java.util.Date());
-                String transcriptionFileName = "transcription_" + timestamp + ".txt";
-                
-                // Create intent to save a document
-                Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
-                intent.addCategory(Intent.CATEGORY_OPENABLE);
-                intent.setType("text/plain");
-                intent.putExtra(Intent.EXTRA_TITLE, transcriptionFileName);
-                
-                temporaryTranscription = transcription;
-                saveTranscriptionLauncher.launch(intent);
-                return;
-            }
+            String transcriptionFileName;
             
-            // Get original file name to create a similar name for transcription
-            String audioFileName = getFileNameFromUri(sourceAudioUri);
-            String transcriptionFileName = "transcription_";
-            
-            if (audioFileName != null) {
-                // Remove extension and add .txt
-                int extensionPos = audioFileName.lastIndexOf(".");
-                if (extensionPos > 0) {
-                    transcriptionFileName = audioFileName.substring(0, extensionPos);
+            // Determine filename to suggest
+            if (suggestedFileName != null) {
+                // Use the suggested name directly
+                transcriptionFileName = suggestedFileName;
+            } else if (sourceAudioUri != null) {
+                // Get original file name to create a similar name for transcription
+                String audioFileName = getFileNameFromUri(sourceAudioUri);
+                
+                if (audioFileName != null) {
+                    // Remove extension and add .txt
+                    int extensionPos = audioFileName.lastIndexOf(".");
+                    if (extensionPos > 0) {
+                        transcriptionFileName = audioFileName.substring(0, extensionPos) + ".txt";
+                    } else {
+                        transcriptionFileName = audioFileName + ".txt";
+                    }
                 } else {
-                    transcriptionFileName = audioFileName;
+                    // Use timestamp if no file name is available
+                    String timestamp = new java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.US)
+                            .format(new java.util.Date());
+                    transcriptionFileName = "transcription_" + timestamp + ".txt";
                 }
             } else {
-                // Use timestamp if no file name is available
+                // Fall back to timestamp for the filename
                 String timestamp = new java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.US)
                         .format(new java.util.Date());
-                transcriptionFileName = "transcription_" + timestamp;
-            }
-            
-            // Add .txt extension
-            if (!transcriptionFileName.endsWith(".txt")) {
-                transcriptionFileName += ".txt";
+                transcriptionFileName = "transcription_" + timestamp + ".txt";
             }
             
             // Create intent to save a document
@@ -916,8 +878,7 @@ public class MainActivity extends AppCompatActivity {
             
             // Try to set initial URI to be the same folder as the audio
             try {
-                // For content URIs, try to get the parent directory
-                if ("content".equals(sourceAudioUri.getScheme())) {
+                if (sourceAudioUri != null && "content".equals(sourceAudioUri.getScheme())) {
                     DocumentFile documentFile = DocumentFile.fromSingleUri(this, sourceAudioUri);
                     if (documentFile != null && documentFile.getParentFile() != null) {
                         intent.putExtra(DocumentsContract.EXTRA_INITIAL_URI, 
@@ -938,25 +899,38 @@ public class MainActivity extends AppCompatActivity {
         } catch (Exception e) {
             Log.e(TAG, "Error initiating save with SAF", e);
             // Handle the error more gracefully with a fallback method
-            try {
-                // Use a basic method as fallback
-                String timestamp = new java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.US)
-                        .format(new java.util.Date());
-                String transcriptionFileName = "transcription_" + timestamp + ".txt";
-                
-                Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
-                intent.addCategory(Intent.CATEGORY_OPENABLE);
-                intent.setType("text/plain");
-                intent.putExtra(Intent.EXTRA_TITLE, transcriptionFileName);
-                
-                temporaryTranscription = transcription;
-                saveTranscriptionLauncher.launch(intent);
-            } catch (Exception fallbackError) {
-                // Last resort - just share the transcription if we can't save it
-                Log.e(TAG, "Fallback save also failed: " + fallbackError.getMessage());
-                Toast.makeText(this, "Error initiating save. Attempting to share instead.", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, "Error initiating save. Attempting to share instead.", Toast.LENGTH_SHORT).show();
+            shareTranscription(transcription);
+        }
+    }
+
+    /**
+     * Shows dialog with options for the transcription for any audio source
+     */
+    private void showTranscriptionOptionsDialog(Uri sourceAudioUri, String transcription) {
+        showTranscriptionOptionsDialog(sourceAudioUri, transcription, null);
+    }
+    
+    /**
+     * Shows dialog with options for the transcription with optional filename suggestion
+     */
+    private void showTranscriptionOptionsDialog(Uri sourceAudioUri, String transcription, String suggestedName) {
+        new AlertDialog.Builder(MainActivity.this)
+            .setTitle("Transcription Complete")
+            .setMessage("What would you like to do with the transcription?")
+            .setPositiveButton("Share", (dialog, which) -> {
                 shareTranscription(transcription);
-            }
+            })
+            .setNegativeButton("Save", (dialog, which) -> {
+                // Always use SAF for saving, even for built-in recordings
+                saveTranscriptionWithSaf(sourceAudioUri, transcription, suggestedName);
+            })
+            .setNeutralButton("Close", null)
+            .show();
+            
+        // Reset the selected URI if it was from external selection
+        if (sourceAudioUri != null) {
+            selectedAudioUri = null;
         }
     }
     
@@ -1138,17 +1112,20 @@ public class MainActivity extends AppCompatActivity {
     
     private String saveTranscriptionToFile(String audioFilePath, String transcription) {
         try {
-            // Create output file path with same name but .txt extension
-            String textFilePath = audioFilePath.substring(0, audioFilePath.lastIndexOf('.')) + ".txt";
-            File textFile = new File(textFilePath);
+            // Create temporary cache file path for sharing
+            String fileName = new File(audioFilePath).getName();
+            String baseName = fileName.substring(0, fileName.lastIndexOf('.'));
+            File cacheFile = new File(getCacheDir(), baseName + ".txt");
             
             // Write transcription to file
-            try (FileOutputStream fos = new FileOutputStream(textFile)) {
+            try (FileOutputStream fos = new FileOutputStream(cacheFile)) {
                 fos.write(transcription.getBytes());
-                return textFilePath;
+                
+                // Return the cache path for sharing references
+                return cacheFile.getAbsolutePath();
             }
         } catch (Exception e) {
-            Log.e(TAG, "Error saving transcription", e);
+            Log.e(TAG, "Error saving transcription to cache", e);
             return null;
         }
     }
