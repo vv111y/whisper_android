@@ -23,6 +23,7 @@ import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.content.ContextCompat;
 
 import com.google.android.material.floatingactionbutton.FloatingActionButton;
+import com.whispertflite.asr.FrameEmitter;
 import com.whispertflite.asr.Player;
 import com.whispertflite.utils.WaveUtil;
 import com.whispertflite.asr.Recorder;
@@ -52,10 +53,13 @@ public class MainActivity extends AppCompatActivity {
     private Button btnRecord;
     private Button btnPlay;
     private Button btnTranscribe;
+    private Button btnWakeListenStart; // new
+    private Button btnWakeListenStop;  // new
 
     private Player mPlayer = null;
     private Recorder mRecorder = null;
     private Whisper mWhisper = null;
+    private FrameEmitter frameEmitter; // new
 
     private File sdcardDataFolder = null;
     private File selectedWaveFile = null;
@@ -223,6 +227,24 @@ public class MainActivity extends AppCompatActivity {
             public void onPlaybackStopped() {
                 handler.post(() -> btnPlay.setText(R.string.play));
             }
+        });
+
+        btnWakeListenStart = findViewById(R.id.btnWakeListenStart);
+        btnWakeListenStop = findViewById(R.id.btnWakeListenStop);
+        frameEmitter = new FrameEmitter(this);
+        frameEmitter.setListener(new FrameEmitter.Listener() {
+            @Override
+            public void onFrame(float[] pcmFrame) {
+                // For now just log; future: pass into VAD/Wake pipeline
+            }
+            @Override
+            public void onError(String msg) { Log.d(TAG, "FrameEmitter error: " + msg); }
+        });
+        btnWakeListenStart.setOnClickListener(v -> {
+            if (!frameEmitter.isRunning()) frameEmitter.start();
+        });
+        btnWakeListenStop.setOnClickListener(v -> {
+            if (frameEmitter.isRunning()) frameEmitter.stop();
         });
 
         // Assume this Activity is the current activity, check record permission
