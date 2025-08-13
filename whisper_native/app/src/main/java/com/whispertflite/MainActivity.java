@@ -28,6 +28,7 @@ import com.whispertflite.asr.Player;
 import com.whispertflite.utils.WaveUtil;
 import com.whispertflite.asr.Recorder;
 import com.whispertflite.asr.Whisper;
+import com.whispertflite.frontend.VadEnergy;
 
 import java.io.File;
 import java.io.FileOutputStream;
@@ -60,6 +61,7 @@ public class MainActivity extends AppCompatActivity {
     private Recorder mRecorder = null;
     private Whisper mWhisper = null;
     private FrameEmitter frameEmitter; // new
+    private VadEnergy vadEnergy; // new
 
     private File sdcardDataFolder = null;
     private File selectedWaveFile = null;
@@ -232,10 +234,15 @@ public class MainActivity extends AppCompatActivity {
         btnWakeListenStart = findViewById(R.id.btnWakeListenStart);
         btnWakeListenStop = findViewById(R.id.btnWakeListenStop);
         frameEmitter = new FrameEmitter(this);
+        vadEnergy = new VadEnergy(0.02f, 20, new VadEnergy.Listener() { // ~400ms hangover at 20ms frames
+            @Override public void onSpeechStart() { Log.d(TAG, "VAD speech start"); }
+            @Override public void onSpeechEnd() { Log.d(TAG, "VAD speech end"); }
+            @Override public void onFrameAccepted(float[] frame, boolean speech) { /* future: route only speech frames */ }
+        });
         frameEmitter.setListener(new FrameEmitter.Listener() {
             @Override
             public void onFrame(float[] pcmFrame) {
-                // For now just log; future: pass into VAD/Wake pipeline
+                vadEnergy.accept(pcmFrame);
             }
             @Override
             public void onError(String msg) { Log.d(TAG, "FrameEmitter error: " + msg); }
