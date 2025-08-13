@@ -28,7 +28,9 @@ import com.whispertflite.asr.Player;
 import com.whispertflite.utils.WaveUtil;
 import com.whispertflite.asr.Recorder;
 import com.whispertflite.asr.Whisper;
+import com.whispertflite.frontend.DtwWakewordDetector;
 import com.whispertflite.frontend.VadEnergy;
+import com.whispertflite.frontend.WakewordDetector;
 
 import java.io.File;
 import java.io.FileOutputStream;
@@ -62,6 +64,7 @@ public class MainActivity extends AppCompatActivity {
     private Whisper mWhisper = null;
     private FrameEmitter frameEmitter; // new
     private VadEnergy vadEnergy; // new
+    private WakewordDetector wakewordDetector; // new
 
     private File sdcardDataFolder = null;
     private File selectedWaveFile = null;
@@ -234,18 +237,30 @@ public class MainActivity extends AppCompatActivity {
         btnWakeListenStart = findViewById(R.id.btnWakeListenStart);
         btnWakeListenStop = findViewById(R.id.btnWakeListenStop);
         frameEmitter = new FrameEmitter(this);
-        vadEnergy = new VadEnergy(0.02f, 20, new VadEnergy.Listener() { // ~400ms hangover at 20ms frames
+        try {
+            wakewordDetector = new DtwWakewordDetector(this,
+                    "wake_templates.txt", // asset placeholder
+                    13, // mfcc coeffs
+                    400, // frame len 25 ms
+                    160, // hop 10 ms
+                    30,  // window frames (~300 ms)
+                    0.8, // trigger threshold (tune)
+                    2000, // debounce ms
+                    score -> Log.d(TAG, "WAKE TRIGGERED score=" + score));
+        } catch (Exception e) {
+            Log.d(TAG, "Wakeword init failed: " + e.getMessage());
+        }
+        frameEmitter.setListener(new FrameEmitter.Listener() {
+            @Override public void onFrame(float[] pcmFrame) { vadEnergy.accept(pcmFrame); }
+            @Override public void onError(String msg) { Log.d(TAG, "FrameEmitter error: " + msg); }
+        });
+        // Replace VAD listener to forward speech frames to wakeword
+        vadEnergy = new VadEnergy(0.02f, 20, new VadEnergy.Listener() {
             @Override public void onSpeechStart() { Log.d(TAG, "VAD speech start"); }
             @Override public void onSpeechEnd() { Log.d(TAG, "VAD speech end"); }
-            @Override public void onFrameAccepted(float[] frame, boolean speech) { /* future: route only speech frames */ }
-        });
-        frameEmitter.setListener(new FrameEmitter.Listener() {
-            @Override
-            public void onFrame(float[] pcmFrame) {
-                vadEnergy.accept(pcmFrame);
+            @Override public void onFrameAccepted(float[] frame, boolean speech) {
+                if (speech && wakewordDetector != null) wakewordDetector.acceptFrame(frame, true);
             }
-            @Override
-            public void onError(String msg) { Log.d(TAG, "FrameEmitter error: " + msg); }
         });
         btnWakeListenStart.setOnClickListener(v -> {
             if (!frameEmitter.isRunning()) frameEmitter.start();
