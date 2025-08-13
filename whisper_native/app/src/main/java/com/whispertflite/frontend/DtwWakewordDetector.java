@@ -15,6 +15,12 @@ import java.util.List;
  * Template-based DTW wakeword detector.
  * Expects asset file with one template per line: comma-separated MFCC values (flattened).
  * Each template must have same frame count * coeffs length.
+ *
+ * Log guide:
+ * - Call setDebugLogScores(true) to log periodic best DTW scores for tuning.
+ * - Speak the wakeword ~10–20 times (positives) and observe score range.
+ * - Stay silent or speak other words (negatives) and observe scores.
+ * - Choose threshold between max positive and min negative with margin.
  */
 public class DtwWakewordDetector implements WakewordDetector {
     private static final String TAG = "DtwWake";
@@ -33,6 +39,10 @@ public class DtwWakewordDetector implements WakewordDetector {
 
     private final List<float[]> templates = new ArrayList<>();
     private final ArrayDeque<float[]> audioBuffer = new ArrayDeque<>(); // holds raw PCM frames (20 ms)
+
+    // Optional periodic score logging for threshold tuning
+    private boolean debugLogScores = false;
+    private long lastLogTs = 0;
 
     // scratch for MFCC window accumulation
     private final List<float[]> mfccWindow = new ArrayList<>();
@@ -57,6 +67,9 @@ public class DtwWakewordDetector implements WakewordDetector {
         this.listener = listener;
         loadTemplates();
     }
+
+    /** Enable/disable periodic best-score logs for threshold tuning. */
+    public void setDebugLogScores(boolean enable) { this.debugLogScores = enable; }
 
     private void loadTemplates() throws IOException {
         try (InputStream is = context.getAssets().open(assetFile);
@@ -98,6 +111,11 @@ public class DtwWakewordDetector implements WakewordDetector {
         }
 
         long now = System.currentTimeMillis();
+        if (debugLogScores && now - lastLogTs > 500) { // log at ~2 Hz
+            lastLogTs = now;
+            Log.d(TAG, "best_dtw=" + best + ", thr=" + triggerThreshold + ", wf=" + windowFrames);
+        }
+
         if (best < triggerThreshold && (now - lastTriggerTs) > debounceMillis) {
             lastTriggerTs = now;
             if (listener != null) listener.onWakeTriggered(best);
