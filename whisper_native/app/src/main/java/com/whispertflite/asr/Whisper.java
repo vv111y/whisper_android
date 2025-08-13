@@ -161,6 +161,7 @@ public class Whisper {
             sendUpdate("Transcription failed: " + e.getMessage());
         } finally {
             mInProgress.set(false);
+            if (completionListener != null) completionListener.onTranscriptionComplete();
         }
     }
 
@@ -209,4 +210,8 @@ public class Whisper {
             return audioBufferQueue.poll();
         }
     }
+
+    public interface CompletionListener { void onTranscriptionComplete(); }
+    private CompletionListener completionListener;
+    public void setCompletionListener(CompletionListener l) { this.completionListener = l; }
 }

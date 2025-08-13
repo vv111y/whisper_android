@@ -29,6 +29,7 @@ import com.whispertflite.utils.WaveUtil;
 import com.whispertflite.asr.Recorder;
 import com.whispertflite.asr.Whisper;
 import com.whispertflite.frontend.DtwWakewordDetector;
+import com.whispertflite.frontend.PipelineController;
 import com.whispertflite.frontend.VadEnergy;
 import com.whispertflite.frontend.WakewordDetector;
 
@@ -65,6 +66,7 @@ public class MainActivity extends AppCompatActivity {
     private FrameEmitter frameEmitter; // new
     private VadEnergy vadEnergy; // new
     private WakewordDetector wakewordDetector; // new
+    private PipelineController pipelineController; // new
 
     private File sdcardDataFolder = null;
     private File selectedWaveFile = null;
@@ -237,36 +239,51 @@ public class MainActivity extends AppCompatActivity {
         btnWakeListenStart = findViewById(R.id.btnWakeListenStart);
         btnWakeListenStop = findViewById(R.id.btnWakeListenStop);
         frameEmitter = new FrameEmitter(this);
+        pipelineController = new PipelineController(FrameEmitter.FRAME_SAMPLES, new PipelineController.Listener() {
+            @Override public void onStateChanged(PipelineController.State state) { Log.d(TAG, "Pipeline state=" + state); handler.post(() -> tvStatus.setText(state.toString())); }
+            @Override public void onWakeTriggered(double score) { Log.d(TAG, "Pipeline wake triggered score=" + score); }
+            @Override public void onUtteranceReady(float[] samples) {
+                // Write temp WAV to reuse existing file transcription path
+                try {
+                    File tmp = new File(sdcardDataFolder, "wake_capture.wav");
+                    com.whispertflite.utils.WaveUtil.createWaveFile(tmp.getAbsolutePath(), to16Bit(samples), 16000,1,2);
+                    if (mWhisper == null) initModel(selectedTfliteFile);
+                    startTranscription(tmp.getAbsolutePath());
+                } catch (Exception e) { Log.d(TAG, "Failed to write wake capture wav: " + e.getMessage()); }
+            }
+        });
+        // adjust wakeword callback to notify pipeline
         try {
             wakewordDetector = new DtwWakewordDetector(this,
-                    "wake_templates.txt", // asset placeholder
-                    13, // mfcc coeffs
-                    400, // frame len 25 ms
-                    160, // hop 10 ms
-                    30,  // window frames (~300 ms)
-                    0.8, // trigger threshold (tune)
-                    2000, // debounce ms
-                    score -> Log.d(TAG, "WAKE TRIGGERED score=" + score));
-        } catch (Exception e) {
-            Log.d(TAG, "Wakeword init failed: " + e.getMessage());
-        }
+                    "wake_templates.txt",
+                    13,
+                    400,
+                    160,
+                    30,
+                    0.8,
+                    2000,
+                    score -> { Log.d(TAG, "WAKE TRIGGERED score=" + score); pipelineController.onWakeTriggered(score); });
+        } catch (Exception e) { Log.d(TAG, "Wakeword init failed: " + e.getMessage()); }
+        // Initialize VAD before assigning frame emitter listener
+        vadEnergy = new VadEnergy(0.02f, 20, new VadEnergy.Listener() {
+            @Override public void onSpeechStart() { Log.d(TAG, "VAD speech start"); }
+            @Override public void onSpeechEnd() { Log.d(TAG, "VAD speech end"); pipelineController.onSpeechEnd(); }
+            @Override public void onFrameAccepted(float[] frame, boolean speech) {
+                if (pipelineController.getState() == PipelineController.State.LISTENING && speech && wakewordDetector != null) wakewordDetector.acceptFrame(frame, true);
+                pipelineController.onFrame(frame, speech);
+            }
+        });
         frameEmitter.setListener(new FrameEmitter.Listener() {
             @Override public void onFrame(float[] pcmFrame) { vadEnergy.accept(pcmFrame); }
             @Override public void onError(String msg) { Log.d(TAG, "FrameEmitter error: " + msg); }
         });
-        // Replace VAD listener to forward speech frames to wakeword
-        vadEnergy = new VadEnergy(0.02f, 20, new VadEnergy.Listener() {
-            @Override public void onSpeechStart() { Log.d(TAG, "VAD speech start"); }
-            @Override public void onSpeechEnd() { Log.d(TAG, "VAD speech end"); }
-            @Override public void onFrameAccepted(float[] frame, boolean speech) {
-                if (speech && wakewordDetector != null) wakewordDetector.acceptFrame(frame, true);
-            }
-        });
         btnWakeListenStart.setOnClickListener(v -> {
             if (!frameEmitter.isRunning()) frameEmitter.start();
+            pipelineController.startListening();
         });
         btnWakeListenStop.setOnClickListener(v -> {
             if (frameEmitter.isRunning()) frameEmitter.stop();
+            pipelineController.stop();
         });
 
         // Assume this Activity is the current activity, check record permission
@@ -312,6 +329,11 @@ public class MainActivity extends AppCompatActivity {
                 Log.d(TAG, "Result: " + result);
                 handler.post(() -> tvResult.append(result));
             }
+        });
+        mWhisper.setCompletionListener(() -> {
+            runOnUiThread(() -> {
+                if (pipelineController != null) pipelineController.onTranscriptionComplete();
+            });
         });
     }
 
@@ -443,6 +465,17 @@ public class MainActivity extends AppCompatActivity {
         }
 
         return filteredFiles;
+    }
+
+    private byte[] to16Bit(float[] samples) {
+        byte[] out = new byte[samples.length * 2];
+        int idx = 0;
+        for (float s : samples) {
+            int v = (int)(Math.max(-1f, Math.min(1f, s)) * 32767);
+            out[idx++] = (byte)(v & 0xFF);
+            out[idx++] = (byte)((v >> 8) & 0xFF);
+        }
+        return out;
     }
 
     static class SharedResource {
