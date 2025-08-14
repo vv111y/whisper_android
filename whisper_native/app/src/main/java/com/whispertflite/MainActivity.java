@@ -270,7 +270,7 @@ public class MainActivity extends AppCompatActivity {
         } catch (Exception e) { Log.d(TAG, "Wakeword init failed: " + e.getMessage()); }
         // Initialize VAD before assigning frame emitter listener
         vadEnergy = new VadEnergy(0.02f, 20, new VadEnergy.Listener() {
-            @Override public void onSpeechStart() { Log.d(TAG, "VAD speech start"); }
+            @Override public void onSpeechStart() { Log.d(TAG, "VAD speech start"); pipelineController.onSpeechStart(); }
             @Override public void onSpeechEnd() { Log.d(TAG, "VAD speech end"); pipelineController.onSpeechEnd(); }
             @Override public void onFrameAccepted(float[] frame, boolean speech) {
                 if (pipelineController.getState() == PipelineController.State.LISTENING && speech && wakewordDetector != null) wakewordDetector.acceptFrame(frame, true);

@@ -1,6 +1,7 @@
 package com.whispertflite.frontend;
 
 import java.util.ArrayList;
+import java.util.ArrayDeque;
 import java.util.List;
 
 /**
@@ -23,6 +24,10 @@ public class PipelineController {
 
     private final List<float[]> captureFrames = new ArrayList<>();
     private boolean capturingSpeechActive = false; // tracks if any speech seen in current capture
+
+    // Pre-roll buffer: keep last N frames while LISTENING to include leading phonemes
+    private final ArrayDeque<float[]> preRoll = new ArrayDeque<>();
+    private int preRollFrames = 10; // ~200ms if frames are 20ms
 
     public PipelineController(int frameSamples, Listener listener) {
         this.frameSamples = frameSamples;
@@ -53,6 +58,21 @@ public class PipelineController {
         stop();
     }
 
+    // Handle VAD speech start: in SESSION mode, begin capturing immediately (no wakeword)
+    public void onSpeechStart() {
+        if (mode == Mode.SESSION && state == State.LISTENING) {
+            captureFrames.clear();
+            // copy pre-roll frames into capture
+            for (float[] fr : preRoll) {
+                float[] copy = new float[fr.length];
+                System.arraycopy(fr, 0, copy, 0, fr.length);
+                captureFrames.add(copy);
+            }
+            capturingSpeechActive = false;
+            setState(State.CAPTURING);
+        }
+    }
+
     public void onWakeTriggered(double score) {
         if (state != State.LISTENING) return;
         if (listener != null) listener.onWakeTriggered(score);
@@ -63,6 +83,14 @@ public class PipelineController {
 
     // Called for every frame while VAD processes; speech=true if inside speech
     public void onFrame(float[] frame, boolean speech) {
+        // Maintain pre-roll while listening
+        if (state == State.LISTENING) {
+            // store a copy to avoid aliasing
+            float[] copy = new float[frame.length];
+            System.arraycopy(frame, 0, copy, 0, frame.length);
+            preRoll.addLast(copy);
+            while (preRoll.size() > preRollFrames) preRoll.pollFirst();
+        }
         if (state == State.CAPTURING) {
             if (speech) {
                 // store copy

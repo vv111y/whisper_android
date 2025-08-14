@@ -1,5 +1,5 @@
 # Define your project and its version
-cmake_minimum_required(VERSION 3.0)
+cmake_minimum_required(VERSION 3.22.1)
 project(TFLiteEngine VERSION 1.0)
 
 # Specify where to find the header files for TF Lite C++
