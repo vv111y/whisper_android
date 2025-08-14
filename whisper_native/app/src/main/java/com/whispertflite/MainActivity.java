@@ -22,6 +22,8 @@ import android.view.LayoutInflater;
 import android.widget.SeekBar;
 import android.media.AudioManager;
 import android.media.ToneGenerator;
+import android.media.session.MediaSession;
+import android.media.session.PlaybackState;
 
 import androidx.annotation.NonNull;
 import androidx.appcompat.app.AppCompatActivity;
@@ -79,6 +81,7 @@ public class MainActivity extends AppCompatActivity {
     private Runnable finalizeRunnable; // debounce finalize for session
     private final long finalizeDelayMs = 550; // allow slightly longer pauses
     private final long rearmDelayMs = 150; // slight delay before re-arming after transcription
+    private MediaSession mediaSession; // capture play/pause from earbuds
 
     private File sdcardDataFolder = null;
     private File selectedWaveFile = null;
@@ -255,6 +258,7 @@ public class MainActivity extends AppCompatActivity {
     btnSessionStart = findViewById(R.id.btnSessionStart);
     btnSessionStop = findViewById(R.id.btnSessionStop);
     btnVadTuning = findViewById(R.id.btnVadTuning);
+    btnSessionPauseResume = findViewById(R.id.btnSessionPauseResume);
         frameEmitter = new FrameEmitter(this);
         pipelineController = new PipelineController(FrameEmitter.FRAME_SAMPLES, new PipelineController.Listener() {
             @Override public void onStateChanged(PipelineController.State state) { Log.d(TAG, "Pipeline state=" + state); handler.post(() -> tvStatus.setText(state.toString())); }
@@ -341,6 +345,61 @@ public class MainActivity extends AppCompatActivity {
         });
 
     btnVadTuning.setOnClickListener(v -> showVadTuningDialog());
+
+        btnSessionPauseResume.setOnClickListener(v -> {
+            if (pipelineController.getState() == PipelineController.State.LISTENING) {
+                pipelineController.pauseListening();
+                btnSessionPauseResume.setText("Resume");
+            } else {
+                if (!frameEmitter.isRunning()) frameEmitter.start();
+                pipelineController.resumeListening();
+                btnSessionPauseResume.setText("Pause");
+            }
+        });
+        // MediaSession for tap-to-pause (earbud play/pause -> toggle session listening)
+        mediaSession = new MediaSession(this, "WhisperSession");
+        mediaSession.setFlags(MediaSession.FLAG_HANDLES_MEDIA_BUTTONS | MediaSession.FLAG_HANDLES_TRANSPORT_CONTROLS);
+        mediaSession.setCallback(new MediaSession.Callback() {
+            @Override
+            public boolean onMediaButtonEvent(android.content.Intent mediaButtonIntent) {
+                // Let the framework handle extraction to KeyEvent via transport controls
+                return super.onMediaButtonEvent(mediaButtonIntent);
+            }
+
+            @Override
+            public void onPlay() {
+                // Treat as resume listening
+                if (!frameEmitter.isRunning()) frameEmitter.start();
+                pipelineController.resumeListening();
+                handler.post(() -> btnSessionPauseResume.setText("Pause"));
+            }
+
+            @Override
+            public void onPause() {
+                // Treat as pause listening
+                pipelineController.pauseListening();
+                handler.post(() -> btnSessionPauseResume.setText("Resume"));
+            }
+
+            @Override
+            public void onPlayPause() {
+                // Toggle
+                if (pipelineController.getState() == com.whispertflite.frontend.PipelineController.State.LISTENING) {
+                    pipelineController.pauseListening();
+                    handler.post(() -> btnSessionPauseResume.setText("Resume"));
+                } else {
+                    if (!frameEmitter.isRunning()) frameEmitter.start();
+                    pipelineController.resumeListening();
+                    handler.post(() -> btnSessionPauseResume.setText("Pause"));
+                }
+            }
+        });
+        PlaybackState state = new PlaybackState.Builder()
+                .setState(PlaybackState.STATE_PAUSED, PlaybackState.PLAYBACK_POSITION_UNKNOWN, 0)
+                .setActions(PlaybackState.ACTION_PLAY | PlaybackState.ACTION_PAUSE | PlaybackState.ACTION_PLAY_PAUSE)
+                .build();
+        mediaSession.setPlaybackState(state);
+        mediaSession.setActive(true);
 
         // Assume this Activity is the current activity, check record permission
         checkRecordPermission();

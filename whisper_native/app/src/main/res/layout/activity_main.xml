@@ -197,6 +197,16 @@
             android:textSize="15sp"
             android:background="@drawable/rounded_button_background"
             android:text="Stop Session" />
+
+        <Button
+            android:id="@+id/btnSessionPauseResume"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_margin="3dp"
+            android:layout_weight="1"
+            android:textSize="15sp"
+            android:background="@drawable/rounded_button_background"
+            android:text="Pause" />
     </LinearLayout>
 
     <LinearLayout

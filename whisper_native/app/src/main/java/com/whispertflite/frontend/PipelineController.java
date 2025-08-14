@@ -76,6 +76,17 @@ public class PipelineController {
         if (state == State.IDLE) setState(State.LISTENING);
     }
 
+    // User-initiated pause/resume of session listening
+    public void pauseListening() {
+        inputGated = true;
+        setState(State.IDLE);
+    }
+
+    public void resumeListening() {
+        inputGated = false;
+        setState(State.LISTENING);
+    }
+
     // Handle VAD speech start: in SESSION mode, begin capturing immediately (no wakeword)
     public void onSpeechStart() {
     if (inputGated) return;
