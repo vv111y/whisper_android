@@ -31,6 +31,9 @@ public class PipelineController {
 
     // Input gating: when true, drop/ignore all mic-driven events to avoid barge-in during output
     private boolean inputGated = false;
+    // Internal merge: while CAPTURING, tolerate short silences before finalizing
+    private int inCaptureSilenceFrames = 12; // ~240ms
+    private int inCaptureSilenceCount = 0;
 
     public PipelineController(int frameSamples, Listener listener) {
         this.frameSamples = frameSamples;
@@ -115,6 +118,16 @@ public class PipelineController {
                 System.arraycopy(frame, 0, copy, 0, frame.length);
                 captureFrames.add(copy);
                 capturingSpeechActive = true;
+                inCaptureSilenceCount = 0;
+            } else {
+                // count brief silences and keep capturing; onSpeechEnd() will decide when to end
+                inCaptureSilenceCount++;
+                if (inCaptureSilenceCount <= inCaptureSilenceFrames) {
+                    // Still consider this part of the same utterance; optionally include a few silent frames for context
+                    float[] copy = new float[frame.length];
+                    System.arraycopy(frame, 0, copy, 0, frame.length);
+                    captureFrames.add(copy);
+                }
             }
         }
     }
@@ -122,6 +135,20 @@ public class PipelineController {
     public void onSpeechEnd() {
     if (inputGated) return;
         if (state == State.CAPTURING && capturingSpeechActive) {
+            // If we only saw a very short pause, do not finalize here; let frames continue to merge
+            if (inCaptureSilenceCount > 0 && inCaptureSilenceCount <= inCaptureSilenceFrames) {
+                // ignore this end; capturing continues until a longer pause happens
+                return;
+            }
+            // Enforce a minimal utterance duration (~300ms) to reduce false positives
+            int minFrames = 15; // 15 * 20ms = 300ms
+            if (captureFrames.size() < minFrames) {
+                // Too short; discard and return to listening
+                captureFrames.clear();
+                capturingSpeechActive = false;
+                setState(State.LISTENING);
+                return;
+            }
             // finalize utterance
             float[] pcm = flatten();
             setState(State.TRANSCRIBING);

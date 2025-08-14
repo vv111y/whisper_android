@@ -17,6 +17,9 @@ public class VadEnergy {
     private final int hangoverFrames; // frames to wait after last speech before ending
     private int silenceCount = 0;
     private boolean inSpeech = false;
+    // Require a few consecutive speech-like frames before declaring speech start (attack hysteresis)
+    private int startAttackFrames = 3; // ~60ms if 20ms frames
+    private int speechStreak = 0;
 
     public VadEnergy(float thresholdRms, int hangoverFrames, Listener listener) {
         this.thresholdRms = thresholdRms;
@@ -27,6 +30,7 @@ public class VadEnergy {
     public void reset() {
         silenceCount = 0;
         inSpeech = false;
+    speechStreak = 0;
     }
 
     public void accept(float[] frame) {
@@ -37,7 +41,8 @@ public class VadEnergy {
 
         if (speechLike) {
             silenceCount = 0;
-            if (!inSpeech) {
+            speechStreak++;
+            if (!inSpeech && speechStreak >= startAttackFrames) {
                 inSpeech = true;
                 if (listener != null) listener.onSpeechStart();
             }
@@ -46,8 +51,12 @@ public class VadEnergy {
             if (silenceCount > hangoverFrames) {
                 inSpeech = false;
                 silenceCount = 0;
+                speechStreak = 0;
                 if (listener != null) listener.onSpeechEnd();
             }
+        } else {
+            // not in speech and not speechLike
+            speechStreak = 0;
         }
         if (listener != null) listener.onFrameAccepted(frame, inSpeech);
     }

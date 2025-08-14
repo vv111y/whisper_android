@@ -72,6 +72,8 @@ public class MainActivity extends AppCompatActivity {
     private WakewordDetector wakewordDetector; // new
     private PipelineController pipelineController; // new
     private ToneGenerator toneGen; // ready click
+    private Runnable finalizeRunnable; // debounce finalize for session
+    private final long finalizeDelayMs = 550; // allow slightly longer pauses
 
     private File sdcardDataFolder = null;
     private File selectedWaveFile = null;
@@ -274,16 +276,32 @@ public class MainActivity extends AppCompatActivity {
                     score -> { Log.d(TAG, "WAKE TRIGGERED score=" + score); pipelineController.onWakeTriggered(score); });
         } catch (Exception e) { Log.d(TAG, "Wakeword init failed: " + e.getMessage()); }
         // Initialize VAD before assigning frame emitter listener
-        vadEnergy = new VadEnergy(0.02f, 20, new VadEnergy.Listener() {
-            @Override public void onSpeechStart() { Log.d(TAG, "VAD speech start"); pipelineController.onSpeechStart(); }
-            @Override public void onSpeechEnd() { Log.d(TAG, "VAD speech end"); pipelineController.onSpeechEnd(); }
+        // Slightly higher threshold and longer hangover to reduce false positives/splits
+        vadEnergy = new VadEnergy(0.035f, 30, new VadEnergy.Listener() {
+            @Override public void onSpeechStart() {
+                Log.d(TAG, "VAD speech start");
+                // Cancel any pending finalize to merge short gaps
+                if (finalizeRunnable != null) handler.removeCallbacks(finalizeRunnable);
+                pipelineController.onSpeechStart();
+            }
+            @Override public void onSpeechEnd() {
+                Log.d(TAG, "VAD speech end");
+                // Debounce finalization to merge brief pauses into one utterance (session mode)
+                if (finalizeRunnable != null) handler.removeCallbacks(finalizeRunnable);
+                finalizeRunnable = () -> pipelineController.onSpeechEnd();
+                handler.postDelayed(finalizeRunnable, finalizeDelayMs);
+            }
             @Override public void onFrameAccepted(float[] frame, boolean speech) {
                 if (pipelineController.getState() == PipelineController.State.LISTENING && speech && wakewordDetector != null) wakewordDetector.acceptFrame(frame, true);
                 pipelineController.onFrame(frame, speech);
             }
         });
         frameEmitter.setListener(new FrameEmitter.Listener() {
-            @Override public void onFrame(float[] pcmFrame) { vadEnergy.accept(pcmFrame); }
+            @Override public void onFrame(float[] pcmFrame) {
+                // Upstream gating: avoid feeding VAD while output is playing (no barge-in)
+                if (pipelineController != null && pipelineController.isInputGated()) return;
+                vadEnergy.accept(pcmFrame);
+            }
             @Override public void onError(String msg) { Log.d(TAG, "FrameEmitter error: " + msg); }
         });
         btnWakeListenStart.setOnClickListener(v -> {
