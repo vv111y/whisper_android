@@ -17,6 +17,8 @@ import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.Spinner;
 import android.widget.TextView;
+import android.media.AudioManager;
+import android.media.ToneGenerator;
 
 import androidx.annotation.NonNull;
 import androidx.appcompat.app.AppCompatActivity;
@@ -69,6 +71,7 @@ public class MainActivity extends AppCompatActivity {
     private VadEnergy vadEnergy; // new
     private WakewordDetector wakewordDetector; // new
     private PipelineController pipelineController; // new
+    private ToneGenerator toneGen; // ready click
 
     private File sdcardDataFolder = null;
     private File selectedWaveFile = null;
@@ -230,11 +233,13 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void onPlaybackStarted() {
                 handler.post(() -> btnPlay.setText(R.string.stop));
+                if (pipelineController != null) pipelineController.onOutputStart();
             }
 
             @Override
             public void onPlaybackStopped() {
                 handler.post(() -> btnPlay.setText(R.string.play));
+                if (pipelineController != null) pipelineController.onOutputEnd();
             }
         });
 
@@ -294,6 +299,17 @@ public class MainActivity extends AppCompatActivity {
         btnSessionStart.setOnClickListener(v -> {
             if (!frameEmitter.isRunning()) frameEmitter.start();
             pipelineController.startSession();
+            // Play short ready tone (200ms) and gate input while playing
+            try {
+                if (toneGen == null) toneGen = new ToneGenerator(AudioManager.STREAM_MUSIC, 80);
+                pipelineController.onOutputStart();
+                toneGen.startTone(ToneGenerator.TONE_PROP_BEEP, 200);
+                handler.postDelayed(() -> {
+                    pipelineController.onOutputEnd();
+                }, 210);
+            } catch (Exception e) {
+                Log.d(TAG, "ToneGenerator failed: " + e.getMessage());
+            }
         });
         btnSessionStop.setOnClickListener(v -> {
             if (frameEmitter.isRunning()) frameEmitter.stop();

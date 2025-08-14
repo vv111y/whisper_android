@@ -29,6 +29,9 @@ public class PipelineController {
     private final ArrayDeque<float[]> preRoll = new ArrayDeque<>();
     private int preRollFrames = 10; // ~200ms if frames are 20ms
 
+    // Input gating: when true, drop/ignore all mic-driven events to avoid barge-in during output
+    private boolean inputGated = false;
+
     public PipelineController(int frameSamples, Listener listener) {
         this.frameSamples = frameSamples;
         this.listener = listener;
@@ -36,6 +39,7 @@ public class PipelineController {
 
     public State getState() { return state; }
     public Mode getMode() { return mode; }
+    public boolean isInputGated() { return inputGated; }
 
     private void setState(State s) {
         if (s != state) {
@@ -58,9 +62,21 @@ public class PipelineController {
         stop();
     }
 
+    // Output lifecycle hooks to implement no barge-in behavior
+    public void onOutputStart() {
+        inputGated = true;
+    }
+
+    public void onOutputEnd() {
+        inputGated = false;
+        // Re-arm listening if we were idle; respect current mode
+        if (state == State.IDLE) setState(State.LISTENING);
+    }
+
     // Handle VAD speech start: in SESSION mode, begin capturing immediately (no wakeword)
     public void onSpeechStart() {
-        if (mode == Mode.SESSION && state == State.LISTENING) {
+    if (inputGated) return;
+    if (mode == Mode.SESSION && state == State.LISTENING) {
             captureFrames.clear();
             // copy pre-roll frames into capture
             for (float[] fr : preRoll) {
@@ -83,6 +99,7 @@ public class PipelineController {
 
     // Called for every frame while VAD processes; speech=true if inside speech
     public void onFrame(float[] frame, boolean speech) {
+    if (inputGated) return;
         // Maintain pre-roll while listening
         if (state == State.LISTENING) {
             // store a copy to avoid aliasing
@@ -103,6 +120,7 @@ public class PipelineController {
     }
 
     public void onSpeechEnd() {
+    if (inputGated) return;
         if (state == State.CAPTURING && capturingSpeechActive) {
             // finalize utterance
             float[] pcm = flatten();
