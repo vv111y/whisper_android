@@ -74,6 +74,7 @@ public class MainActivity extends AppCompatActivity {
     private ToneGenerator toneGen; // ready click
     private Runnable finalizeRunnable; // debounce finalize for session
     private final long finalizeDelayMs = 550; // allow slightly longer pauses
+    private final long rearmDelayMs = 150; // slight delay before re-arming after transcription
 
     private File sdcardDataFolder = null;
     private File selectedWaveFile = null;
@@ -375,12 +376,18 @@ public class MainActivity extends AppCompatActivity {
                 handler.post(() -> tvStatus.setText("Processing done in " + timeTaken + "ms"));
 
                 Log.d(TAG, "Result: " + result);
-                handler.post(() -> tvResult.append(result));
+                handler.post(() -> {
+                    boolean session = (pipelineController != null && pipelineController.getMode() == PipelineController.Mode.SESSION);
+                    String line = session ? ("• " + result + "\n") : (result + "\n");
+                    tvResult.append(line);
+                });
             }
         });
         mWhisper.setCompletionListener(() -> {
             runOnUiThread(() -> {
-                if (pipelineController != null) pipelineController.onTranscriptionComplete();
+                if (pipelineController != null) {
+                    handler.postDelayed(() -> pipelineController.onTranscriptionComplete(), rearmDelayMs);
+                }
             });
         });
     }
