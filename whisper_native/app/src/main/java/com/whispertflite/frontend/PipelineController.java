@@ -8,6 +8,7 @@ import java.util.List;
  */
 public class PipelineController {
     public enum State { IDLE, LISTENING, CAPTURING, TRANSCRIBING }
+    public enum Mode { WAKEWORD, SESSION }
 
     public interface Listener {
         void onStateChanged(State state);
@@ -16,6 +17,7 @@ public class PipelineController {
     }
 
     private State state = State.IDLE;
+    private Mode mode = Mode.WAKEWORD;
     private final Listener listener;
     private final int frameSamples; // e.g., 320
 
@@ -28,6 +30,7 @@ public class PipelineController {
     }
 
     public State getState() { return state; }
+    public Mode getMode() { return mode; }
 
     private void setState(State s) {
         if (s != state) {
@@ -38,6 +41,17 @@ public class PipelineController {
 
     public void startListening() { setState(State.LISTENING); }
     public void stop() { setState(State.IDLE); captureFrames.clear(); }
+
+    // Session-mode scaffolding (no-op transitions for commit 1)
+    public void startSession() {
+        mode = Mode.SESSION;
+        startListening();
+    }
+
+    public void stopSession() {
+        mode = Mode.WAKEWORD; // revert to default
+        stop();
+    }
 
     public void onWakeTriggered(double score) {
         if (state != State.LISTENING) return;

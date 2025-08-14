@@ -59,6 +59,8 @@ public class MainActivity extends AppCompatActivity {
     private Button btnTranscribe;
     private Button btnWakeListenStart; // new
     private Button btnWakeListenStop;  // new
+    private Button btnSessionStart;    // new
+    private Button btnSessionStop;     // new
 
     private Player mPlayer = null;
     private Recorder mRecorder = null;
@@ -236,8 +238,10 @@ public class MainActivity extends AppCompatActivity {
             }
         });
 
-        btnWakeListenStart = findViewById(R.id.btnWakeListenStart);
-        btnWakeListenStop = findViewById(R.id.btnWakeListenStop);
+    btnWakeListenStart = findViewById(R.id.btnWakeListenStart);
+    btnWakeListenStop = findViewById(R.id.btnWakeListenStop);
+    btnSessionStart = findViewById(R.id.btnSessionStart);
+    btnSessionStop = findViewById(R.id.btnSessionStop);
         frameEmitter = new FrameEmitter(this);
         pipelineController = new PipelineController(FrameEmitter.FRAME_SAMPLES, new PipelineController.Listener() {
             @Override public void onStateChanged(PipelineController.State state) { Log.d(TAG, "Pipeline state=" + state); handler.post(() -> tvStatus.setText(state.toString())); }
@@ -284,6 +288,16 @@ public class MainActivity extends AppCompatActivity {
         btnWakeListenStop.setOnClickListener(v -> {
             if (frameEmitter.isRunning()) frameEmitter.stop();
             pipelineController.stop();
+        });
+
+        // Session listen wiring (scaffold only; behavior added in next commit)
+        btnSessionStart.setOnClickListener(v -> {
+            if (!frameEmitter.isRunning()) frameEmitter.start();
+            pipelineController.startSession();
+        });
+        btnSessionStop.setOnClickListener(v -> {
+            if (frameEmitter.isRunning()) frameEmitter.stop();
+            pipelineController.stopSession();
         });
 
         // Assume this Activity is the current activity, check record permission
