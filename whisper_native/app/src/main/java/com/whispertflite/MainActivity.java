@@ -17,6 +17,9 @@ import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.Spinner;
 import android.widget.TextView;
+import android.app.AlertDialog;
+import android.view.LayoutInflater;
+import android.widget.SeekBar;
 import android.media.AudioManager;
 import android.media.ToneGenerator;
 
@@ -63,6 +66,7 @@ public class MainActivity extends AppCompatActivity {
     private Button btnWakeListenStop;  // new
     private Button btnSessionStart;    // new
     private Button btnSessionStop;     // new
+    private Button btnVadTuning;       // new
 
     private Player mPlayer = null;
     private Recorder mRecorder = null;
@@ -250,6 +254,7 @@ public class MainActivity extends AppCompatActivity {
     btnWakeListenStop = findViewById(R.id.btnWakeListenStop);
     btnSessionStart = findViewById(R.id.btnSessionStart);
     btnSessionStop = findViewById(R.id.btnSessionStop);
+    btnVadTuning = findViewById(R.id.btnVadTuning);
         frameEmitter = new FrameEmitter(this);
         pipelineController = new PipelineController(FrameEmitter.FRAME_SAMPLES, new PipelineController.Listener() {
             @Override public void onStateChanged(PipelineController.State state) { Log.d(TAG, "Pipeline state=" + state); handler.post(() -> tvStatus.setText(state.toString())); }
@@ -335,11 +340,92 @@ public class MainActivity extends AppCompatActivity {
             pipelineController.stopSession();
         });
 
+    btnVadTuning.setOnClickListener(v -> showVadTuningDialog());
+
         // Assume this Activity is the current activity, check record permission
         checkRecordPermission();
 
         // for debugging
 //        testParallelProcessing();
+    }
+
+    private void showVadTuningDialog() {
+        if (vadEnergy == null) return;
+        LayoutInflater inflater = LayoutInflater.from(this);
+        View view = inflater.inflate(R.layout.dialog_vad_tuning, null);
+        SeekBar seekThr = view.findViewById(R.id.seekThreshold);
+        SeekBar seekHang = view.findViewById(R.id.seekHangover);
+        SeekBar seekAtk = view.findViewById(R.id.seekAttack);
+    TextView txtThrVal = view.findViewById(R.id.txtThresholdVal);
+    TextView txtHangVal = view.findViewById(R.id.txtHangoverVal);
+    TextView txtAtkVal = view.findViewById(R.id.txtAttackVal);
+
+        // Map threshold 0.005..0.1 to 0..100
+        float thr = vadEnergy.getThreshold();
+        int thrProg = (int)Math.max(0, Math.min(100, Math.round((thr - 0.005f) / (0.1f - 0.005f) * 100f)));
+        seekThr.setProgress(thrProg);
+    seekThr.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override public void onProgressChanged(SeekBar sb, int p, boolean fromUser) {
+                float v = 0.005f + (p / 100f) * (0.1f - 0.005f);
+                vadEnergy.setThreshold(v);
+        txtThrVal.setText(String.format(java.util.Locale.US, "%.3f", v));
+            }
+            @Override public void onStartTrackingTouch(SeekBar seekBar) {}
+            @Override public void onStopTrackingTouch(SeekBar seekBar) {}
+        });
+
+        int hang = vadEnergy.getHangoverFrames();
+        seekHang.setProgress(Math.max(0, Math.min(100, hang)));
+        seekHang.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override public void onProgressChanged(SeekBar sb, int p, boolean fromUser) { vadEnergy.setHangoverFrames(p); txtHangVal.setText(String.valueOf(p)); }
+            @Override public void onStartTrackingTouch(SeekBar seekBar) {}
+            @Override public void onStopTrackingTouch(SeekBar seekBar) {}
+        });
+
+        int atk = vadEnergy.getStartAttackFrames();
+        seekAtk.setProgress(Math.max(1, Math.min(10, atk)));
+        seekAtk.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override public void onProgressChanged(SeekBar sb, int p, boolean fromUser) { int v = Math.max(1, p); vadEnergy.setStartAttackFrames(v); txtAtkVal.setText(String.valueOf(v)); }
+            @Override public void onStartTrackingTouch(SeekBar seekBar) {}
+            @Override public void onStopTrackingTouch(SeekBar seekBar) {}
+        });
+
+        // Initialize value labels
+        txtThrVal.setText(String.format(java.util.Locale.US, "%.3f", vadEnergy.getThreshold()));
+        txtHangVal.setText(String.valueOf(vadEnergy.getHangoverFrames()));
+        txtAtkVal.setText(String.valueOf(vadEnergy.getStartAttackFrames()));
+
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle("VAD Tuning")
+                .setView(view)
+                .setPositiveButton("Close", null)
+                .setNeutralButton("Reset", null)
+                .create();
+        dialog.setOnShowListener(dlg -> {
+            android.widget.Button resetBtn = dialog.getButton(AlertDialog.BUTTON_NEUTRAL);
+            if (resetBtn != null) {
+                resetBtn.setOnClickListener(v2 -> {
+                    // Tuned defaults
+                    float thrDef = 0.035f;
+                    int hangDef = 30;
+                    int atkDef = 3;
+                    // Apply
+                    vadEnergy.setThreshold(thrDef);
+                    vadEnergy.setHangoverFrames(hangDef);
+                    vadEnergy.setStartAttackFrames(atkDef);
+                    // Update UI
+                    int thrProgDef = (int)Math.max(0, Math.min(100, Math.round((thrDef - 0.005f) / (0.1f - 0.005f) * 100f)));
+                    seekThr.setProgress(thrProgDef);
+                    seekHang.setProgress(hangDef);
+                    seekAtk.setProgress(atkDef);
+                    txtThrVal.setText(String.format(java.util.Locale.US, "%.3f", thrDef));
+                    txtHangVal.setText(String.valueOf(hangDef));
+                    txtAtkVal.setText(String.valueOf(atkDef));
+                    // Do not dismiss dialog
+                });
+            }
+        });
+        dialog.show();
     }
 
     // Model initialization
