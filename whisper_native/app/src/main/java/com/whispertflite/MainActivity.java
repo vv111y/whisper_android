@@ -20,7 +20,10 @@ import android.widget.TextView;
 import android.app.AlertDialog;
 import android.view.LayoutInflater;
 import android.widget.SeekBar;
+import android.view.KeyEvent;
 import android.media.AudioManager;
+import android.media.AudioAttributes;
+import android.media.AudioFocusRequest;
 import android.media.ToneGenerator;
 import android.media.session.MediaSession;
 import android.media.session.PlaybackState;
@@ -69,6 +72,7 @@ public class MainActivity extends AppCompatActivity {
     private Button btnSessionStart;    // new
     private Button btnSessionStop;     // new
     private Button btnVadTuning;       // new
+    private Button btnSessionPauseResume; // new
 
     private Player mPlayer = null;
     private Recorder mRecorder = null;
@@ -82,6 +86,9 @@ public class MainActivity extends AppCompatActivity {
     private final long finalizeDelayMs = 550; // allow slightly longer pauses
     private final long rearmDelayMs = 150; // slight delay before re-arming after transcription
     private MediaSession mediaSession; // capture play/pause from earbuds
+    private AudioManager audioManager; // manage audio focus for media buttons
+    private AudioFocusRequest audioFocusRequest; // focus request (O+)
+    private boolean hasAudioFocus = false;
 
     private File sdcardDataFolder = null;
     private File selectedWaveFile = null;
@@ -327,6 +334,25 @@ public class MainActivity extends AppCompatActivity {
         btnSessionStart.setOnClickListener(v -> {
             if (!frameEmitter.isRunning()) frameEmitter.start();
             pipelineController.startSession();
+            try {
+                android.content.Intent svc = new android.content.Intent(this, SessionService.class);
+                ContextCompat.startForegroundService(this, svc);
+            } catch (Throwable t) { Log.d(TAG, "Failed to start foreground service: " + t.getMessage()); }
+            if (requestAudioFocus()) {
+                mediaSession.setActive(true);
+                updatePlaybackState(PlaybackState.STATE_PLAYING);
+            }
+            // Brief silent playback to claim media controls on some devices
+            try {
+                File silent = ensureSilentWav(200);
+                if (silent != null && mPlayer != null && !mPlayer.isPlaying()) {
+                    mPlayer.initializePlayer(silent.getAbsolutePath());
+                    mPlayer.startPlayback();
+                    handler.postDelayed(() -> {
+                        try { if (mPlayer.isPlaying()) mPlayer.stopPlayback(); } catch (Exception ignore) {}
+                    }, 250);
+                }
+            } catch (Exception e) { Log.d(TAG, "Silent claim failed: " + e.getMessage()); }
             // Play short ready tone (200ms) and gate input while playing
             try {
                 if (toneGen == null) toneGen = new ToneGenerator(AudioManager.STREAM_MUSIC, 80);
@@ -342,6 +368,13 @@ public class MainActivity extends AppCompatActivity {
         btnSessionStop.setOnClickListener(v -> {
             if (frameEmitter.isRunning()) frameEmitter.stop();
             pipelineController.stopSession();
+            updatePlaybackState(PlaybackState.STATE_STOPPED);
+            mediaSession.setActive(false);
+            abandonAudioFocus();
+            try {
+                android.content.Intent svc = new android.content.Intent(this, SessionService.class);
+                stopService(svc);
+            } catch (Throwable t) { Log.d(TAG, "Failed to stop foreground service: " + t.getMessage()); }
         });
 
     btnVadTuning.setOnClickListener(v -> showVadTuningDialog());
@@ -350,19 +383,70 @@ public class MainActivity extends AppCompatActivity {
             if (pipelineController.getState() == PipelineController.State.LISTENING) {
                 pipelineController.pauseListening();
                 btnSessionPauseResume.setText("Resume");
+                updatePlaybackState(PlaybackState.STATE_PAUSED);
             } else {
                 if (!frameEmitter.isRunning()) frameEmitter.start();
                 pipelineController.resumeListening();
                 btnSessionPauseResume.setText("Pause");
+                if (requestAudioFocus()) {
+                    mediaSession.setActive(true);
+                }
+                updatePlaybackState(PlaybackState.STATE_PLAYING);
             }
         });
-        // MediaSession for tap-to-pause (earbud play/pause -> toggle session listening)
-        mediaSession = new MediaSession(this, "WhisperSession");
+    // MediaSession for tap-to-pause (earbud play/pause -> toggle session listening)
+    audioManager = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
+    mediaSession = new MediaSession(this, "WhisperSession");
+    MediaSessionHolder.set(mediaSession);
         mediaSession.setFlags(MediaSession.FLAG_HANDLES_MEDIA_BUTTONS | MediaSession.FLAG_HANDLES_TRANSPORT_CONTROLS);
+        try {
+            android.app.PendingIntent pi = android.app.PendingIntent.getActivity(
+            this,
+            0,
+            new android.content.Intent(this, MainActivity.class),
+            android.os.Build.VERSION.SDK_INT >= 23 ? (android.app.PendingIntent.FLAG_UPDATE_CURRENT | android.app.PendingIntent.FLAG_IMMUTABLE) : android.app.PendingIntent.FLAG_UPDATE_CURRENT
+        );
+        mediaSession.setSessionActivity(pi);
+            mediaSession.setMediaButtonReceiver(pi);
+    } catch (Throwable ignore) {}
+    try {
+        mediaSession.setPlaybackToLocal(new AudioAttributes.Builder()
+            .setUsage(AudioAttributes.USAGE_MEDIA)
+            .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+            .build());
+        } catch (Throwable t) {
+            // ignore if not supported on some API levels
+        }
         mediaSession.setCallback(new MediaSession.Callback() {
             @Override
             public boolean onMediaButtonEvent(android.content.Intent mediaButtonIntent) {
-                // Let the framework handle extraction to KeyEvent via transport controls
+                Log.d(TAG, "onMediaButtonEvent: " + mediaButtonIntent);
+                KeyEvent keyEvent = mediaButtonIntent.getParcelableExtra(android.content.Intent.EXTRA_KEY_EVENT);
+                if (keyEvent != null && keyEvent.getAction() == KeyEvent.ACTION_DOWN) {
+                    int code = keyEvent.getKeyCode();
+                    Log.d(TAG, "Media key code: " + code);
+            if (code == KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE || code == KeyEvent.KEYCODE_HEADSETHOOK
+                || code == KeyEvent.KEYCODE_MEDIA_NEXT || code == KeyEvent.KEYCODE_MEDIA_PREVIOUS) {
+                        if (pipelineController.getState() == com.whispertflite.frontend.PipelineController.State.LISTENING) {
+                            pipelineController.pauseListening();
+                            handler.post(() -> btnSessionPauseResume.setText("Resume"));
+                        } else {
+                            if (!frameEmitter.isRunning()) frameEmitter.start();
+                            pipelineController.resumeListening();
+                            handler.post(() -> btnSessionPauseResume.setText("Pause"));
+                        }
+                        return true;
+                    } else if (code == KeyEvent.KEYCODE_MEDIA_PLAY) {
+                        if (!frameEmitter.isRunning()) frameEmitter.start();
+                        pipelineController.resumeListening();
+                        handler.post(() -> btnSessionPauseResume.setText("Pause"));
+                        return true;
+                    } else if (code == KeyEvent.KEYCODE_MEDIA_PAUSE) {
+                        pipelineController.pauseListening();
+                        handler.post(() -> btnSessionPauseResume.setText("Resume"));
+                        return true;
+                    }
+                }
                 return super.onMediaButtonEvent(mediaButtonIntent);
             }
 
@@ -372,6 +456,8 @@ public class MainActivity extends AppCompatActivity {
                 if (!frameEmitter.isRunning()) frameEmitter.start();
                 pipelineController.resumeListening();
                 handler.post(() -> btnSessionPauseResume.setText("Pause"));
+                if (requestAudioFocus()) mediaSession.setActive(true);
+                updatePlaybackState(PlaybackState.STATE_PLAYING);
             }
 
             @Override
@@ -379,27 +465,13 @@ public class MainActivity extends AppCompatActivity {
                 // Treat as pause listening
                 pipelineController.pauseListening();
                 handler.post(() -> btnSessionPauseResume.setText("Resume"));
+                updatePlaybackState(PlaybackState.STATE_PAUSED);
             }
 
-            @Override
-            public void onPlayPause() {
-                // Toggle
-                if (pipelineController.getState() == com.whispertflite.frontend.PipelineController.State.LISTENING) {
-                    pipelineController.pauseListening();
-                    handler.post(() -> btnSessionPauseResume.setText("Resume"));
-                } else {
-                    if (!frameEmitter.isRunning()) frameEmitter.start();
-                    pipelineController.resumeListening();
-                    handler.post(() -> btnSessionPauseResume.setText("Pause"));
-                }
-            }
+            // No onPlayPause in Callback; handled via onMediaButtonEvent above
         });
-        PlaybackState state = new PlaybackState.Builder()
-                .setState(PlaybackState.STATE_PAUSED, PlaybackState.PLAYBACK_POSITION_UNKNOWN, 0)
-                .setActions(PlaybackState.ACTION_PLAY | PlaybackState.ACTION_PAUSE | PlaybackState.ACTION_PLAY_PAUSE)
-                .build();
-        mediaSession.setPlaybackState(state);
-        mediaSession.setActive(true);
+    // Prepare session; activation controlled by session start/stop
+    updatePlaybackState(PlaybackState.STATE_PAUSED);
 
         // Assume this Activity is the current activity, check record permission
         checkRecordPermission();
@@ -485,6 +557,82 @@ public class MainActivity extends AppCompatActivity {
             }
         });
         dialog.show();
+    }
+
+    private void updatePlaybackState(int state) {
+        long actions = PlaybackState.ACTION_PLAY
+                | PlaybackState.ACTION_PAUSE
+                | PlaybackState.ACTION_PLAY_PAUSE
+                | PlaybackState.ACTION_STOP
+                | PlaybackState.ACTION_SKIP_TO_NEXT
+                | PlaybackState.ACTION_SKIP_TO_PREVIOUS;
+        PlaybackState pbState = new PlaybackState.Builder()
+                .setState(state, PlaybackState.PLAYBACK_POSITION_UNKNOWN, 0)
+                .setActions(actions)
+                .build();
+        if (mediaSession != null) mediaSession.setPlaybackState(pbState);
+    }
+
+    private boolean requestAudioFocus() {
+        if (hasAudioFocus) return true;
+        try {
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                AudioAttributes attrs = new AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_MEDIA)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+                        .build();
+                audioFocusRequest = new AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
+                        .setAudioAttributes(attrs)
+                        .setAcceptsDelayedFocusGain(false)
+                        .setOnAudioFocusChangeListener(focusChange -> {
+                            if (focusChange == AudioManager.AUDIOFOCUS_LOSS || focusChange == AudioManager.AUDIOFOCUS_LOSS_TRANSIENT) {
+                                // Pause listening on focus loss
+                                pipelineController.pauseListening();
+                                handler.post(() -> btnSessionPauseResume.setText("Resume"));
+                                updatePlaybackState(PlaybackState.STATE_PAUSED);
+                            }
+                        })
+                        .build();
+                int res = audioManager.requestAudioFocus(audioFocusRequest);
+                hasAudioFocus = (res == AudioManager.AUDIOFOCUS_REQUEST_GRANTED);
+            } else {
+                int res = audioManager.requestAudioFocus(
+                        focusChange -> {
+                            if (focusChange == AudioManager.AUDIOFOCUS_LOSS || focusChange == AudioManager.AUDIOFOCUS_LOSS_TRANSIENT) {
+                                pipelineController.pauseListening();
+                                handler.post(() -> btnSessionPauseResume.setText("Resume"));
+                                updatePlaybackState(PlaybackState.STATE_PAUSED);
+                            }
+                        },
+                        AudioManager.STREAM_MUSIC,
+                        AudioManager.AUDIOFOCUS_GAIN);
+                hasAudioFocus = (res == AudioManager.AUDIOFOCUS_REQUEST_GRANTED);
+            }
+        } catch (Exception ignore) { hasAudioFocus = false; }
+        return hasAudioFocus;
+    }
+
+    private void abandonAudioFocus() {
+        if (!hasAudioFocus) return;
+        try {
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O && audioFocusRequest != null) {
+                audioManager.abandonAudioFocusRequest(audioFocusRequest);
+            } else {
+                audioManager.abandonAudioFocus(null);
+            }
+        } catch (Exception ignore) {}
+        hasAudioFocus = false;
+    }
+
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        try {
+            if (mediaSession != null) {
+                // Keep session instance; SessionService holds foreground state
+            }
+        } catch (Exception ignore) {}
+        abandonAudioFocus();
     }
 
     // Model initialization
@@ -676,6 +824,53 @@ public class MainActivity extends AppCompatActivity {
             out[idx++] = (byte)((v >> 8) & 0xFF);
         }
         return out;
+    }
+
+    private File ensureSilentWav(int durationMs) throws IOException {
+        if (sdcardDataFolder == null) return null;
+        File f = new File(sdcardDataFolder, "silent_claim.wav");
+        if (f.exists()) return f;
+        int sampleRate = 16000;
+        int channels = 1;
+        int bytesPerSample = 2;
+        int numSamples = (int)((long)durationMs * sampleRate / 1000L);
+        int dataSize = numSamples * channels * bytesPerSample;
+        int totalSize = 44 + dataSize;
+        try (java.io.FileOutputStream out = new java.io.FileOutputStream(f)) {
+            // RIFF header
+            out.write(new byte[]{'R','I','F','F'});
+            out.write(intLE(totalSize - 8));
+            out.write(new byte[]{'W','A','V','E'});
+            // fmt chunk
+            out.write(new byte[]{'f','m','t',' '});
+            out.write(intLE(16)); // PCM fmt chunk size
+            out.write(shortLE((short)1)); // PCM
+            out.write(shortLE((short)channels));
+            out.write(intLE(sampleRate));
+            out.write(intLE(sampleRate * channels * bytesPerSample));
+            out.write(shortLE((short)(channels * bytesPerSample)));
+            out.write(shortLE((short)(bytesPerSample * 8)));
+            // data chunk
+            out.write(new byte[]{'d','a','t','a'});
+            out.write(intLE(dataSize));
+            // zeros for silence
+            byte[] zeros = new byte[Math.min(8192, dataSize)];
+            int remaining = dataSize;
+            while (remaining > 0) {
+                int n = Math.min(remaining, zeros.length);
+                out.write(zeros, 0, n);
+                remaining -= n;
+            }
+        }
+        return f;
+    }
+
+    private byte[] intLE(int v) {
+        return new byte[]{(byte)(v & 0xFF), (byte)((v >> 8) & 0xFF), (byte)((v >> 16) & 0xFF), (byte)((v >> 24) & 0xFF)};
+    }
+
+    private byte[] shortLE(short v) {
+        return new byte[]{(byte)(v & 0xFF), (byte)((v >> 8) & 0xFF)};
     }
 
     static class SharedResource {
