@@ -42,6 +42,7 @@ import com.whispertflite.frontend.DtwWakewordDetector;
 import com.whispertflite.frontend.PipelineController;
 import com.whispertflite.frontend.VadEnergy;
 import com.whispertflite.frontend.WakewordDetector;
+import com.whispertflite.audio.BeepPlayer;
 
 import java.io.File;
 import java.io.FileOutputStream;
@@ -90,6 +91,9 @@ public class MainActivity extends AppCompatActivity {
     private AudioManager audioManager; // manage audio focus for media buttons
     private AudioFocusRequest audioFocusRequest; // focus request (O+)
     private boolean hasAudioFocus = false;
+    private AudioFocusRequest toneFocusRequest; // transient focus for tones
+    private boolean toneFocusHeld = false;
+    private BeepPlayer beepPlayer;
     private boolean mediaKeysObserved = false; // for conditional fallback
     private Runnable fallbackClaimTask; // schedule AudioTrack fallback if needed
     private Runnable inactivityReleaseTask; // release silent claim after idle
@@ -318,7 +322,16 @@ public class MainActivity extends AppCompatActivity {
         });
         frameEmitter = new FrameEmitter(this);
         pipelineController = new PipelineController(FrameEmitter.FRAME_SAMPLES, new PipelineController.Listener() {
-            @Override public void onStateChanged(PipelineController.State state) { Log.d(TAG, "Pipeline state=" + state); handler.post(() -> tvStatus.setText(state.toString())); }
+            @Override public void onStateChanged(PipelineController.State state) {
+                Log.d(TAG, "Pipeline state=" + state);
+                handler.post(() -> tvStatus.setText(state.toString()));
+                // Audio feedback on state transitions: LISTENING and IDLE
+                if (state == PipelineController.State.LISTENING) {
+                    playStateTone(true);
+                } else if (state == PipelineController.State.IDLE) {
+                    playStateTone(false);
+                }
+            }
             @Override public void onWakeTriggered(double score) { Log.d(TAG, "Pipeline wake triggered score=" + score); }
             @Override public void onUtteranceReady(float[] samples) {
                 // Write temp WAV to reuse existing file transcription path
@@ -421,17 +434,6 @@ public class MainActivity extends AppCompatActivity {
             }
             // Start inactivity timer to release fallback later
             scheduleInactivityRelease();
-            // Play short ready tone (200ms) and gate input while playing
-            try {
-                if (toneGen == null) toneGen = new ToneGenerator(AudioManager.STREAM_MUSIC, 80);
-                pipelineController.onOutputStart();
-                toneGen.startTone(ToneGenerator.TONE_PROP_BEEP, 200);
-                handler.postDelayed(() -> {
-                    pipelineController.onOutputEnd();
-                }, 210);
-            } catch (Exception e) {
-                Log.d(TAG, "ToneGenerator failed: " + e.getMessage());
-            }
         });
         btnSessionStop.setOnClickListener(v -> {
             if (frameEmitter.isRunning()) frameEmitter.stop();
@@ -729,6 +731,43 @@ public class MainActivity extends AppCompatActivity {
         hasAudioFocus = false;
     }
 
+    private void requestToneFocusIfNeeded() {
+        if (hasAudioFocus || toneFocusHeld) return;
+        try {
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                AudioAttributes attrs = new AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_ASSISTANCE_SONIFICATION)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                        .build();
+                toneFocusRequest = new AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)
+                        .setAudioAttributes(attrs)
+                        .setAcceptsDelayedFocusGain(false)
+                        .setOnAudioFocusChangeListener(fc -> {})
+                        .build();
+                int res = audioManager.requestAudioFocus(toneFocusRequest);
+                toneFocusHeld = (res == AudioManager.AUDIOFOCUS_REQUEST_GRANTED);
+            } else {
+                int res = audioManager.requestAudioFocus(
+                        fc -> {},
+                        AudioManager.STREAM_MUSIC,
+                        AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK);
+                toneFocusHeld = (res == AudioManager.AUDIOFOCUS_REQUEST_GRANTED);
+            }
+        } catch (Exception ignore) { toneFocusHeld = false; }
+    }
+
+    private void abandonToneFocus() {
+        if (!toneFocusHeld) return;
+        try {
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O && toneFocusRequest != null) {
+                audioManager.abandonAudioFocusRequest(toneFocusRequest);
+            } else {
+                audioManager.abandonAudioFocus(null);
+            }
+        } catch (Exception ignore) {}
+        toneFocusHeld = false;
+    }
+
     @Override
     protected void onDestroy() {
         super.onDestroy();
@@ -738,6 +777,7 @@ public class MainActivity extends AppCompatActivity {
             }
         } catch (Exception ignore) {}
         abandonAudioFocus();
+    try { if (beepPlayer != null) { beepPlayer.release(); beepPlayer = null; } } catch (Exception ignore) {}
     }
 
     // Model initialization
@@ -976,6 +1016,38 @@ public class MainActivity extends AppCompatActivity {
 
     private byte[] shortLE(short v) {
         return new byte[]{(byte)(v & 0xFF), (byte)((v >> 8) & 0xFF)};
+    }
+
+    // Play audio feedback tones for state transitions.
+    // listening=true => keep existing single beep (200ms)
+    // listening=false => short double beep (two 120ms beeps with slight gap)
+    private void playStateTone(boolean listening) {
+        if (pipelineController == null) return;
+        handler.post(() -> {
+            if (beepPlayer == null) beepPlayer = new BeepPlayer();
+            // Request transient focus only if we don't already hold session focus
+            requestToneFocusIfNeeded();
+            // Gate mic during short tones
+            pipelineController.gateInput(true);
+            if (listening) {
+                final int delayMs = 30;
+                handler.postDelayed(() -> { try { beepPlayer.playListeningBeep(); } catch (Exception ignore) {} }, delayMs);
+                handler.postDelayed(() -> {
+                    pipelineController.gateInput(false);
+                    abandonToneFocus();
+                }, delayMs + 270);
+            } else {
+                try {
+                    beepPlayer.playIdleDoubleBeep(() -> {
+                        pipelineController.gateInput(false);
+                        abandonToneFocus();
+                    });
+                } catch (Exception e) {
+                    pipelineController.gateInput(false);
+                    abandonToneFocus();
+                }
+            }
+        });
     }
 
     static class SharedResource {

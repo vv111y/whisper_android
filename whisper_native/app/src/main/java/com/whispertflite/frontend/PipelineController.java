@@ -43,6 +43,8 @@ public class PipelineController {
     public State getState() { return state; }
     public Mode getMode() { return mode; }
     public boolean isInputGated() { return inputGated; }
+    // Allow UI to temporarily gate input during short tones without forcing state changes
+    public void gateInput(boolean gated) { this.inputGated = gated; }
 
     private void setState(State s) {
         if (s != state) {
