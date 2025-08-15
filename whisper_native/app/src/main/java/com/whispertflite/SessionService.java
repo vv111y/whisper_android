@@ -15,6 +15,7 @@ import android.media.session.MediaSession;
 import android.media.AudioAttributes;
 import android.media.AudioFormat;
 import android.media.AudioTrack;
+import android.media.AudioManager;
 import android.net.Uri;
 import java.io.File;
 import java.io.FileOutputStream;
@@ -34,7 +35,15 @@ public class SessionService extends Service {
         createChannel();
         Notification notification = buildNotification();
         startForeground(NOTIF_ID, notification);
-        startSilentLoop();
+        String cmd = intent != null ? intent.getStringExtra("command") : null;
+        if (cmd == null || "startNoAudio".equals(cmd)) {
+            // Do not start silent loop by default
+            stopSilentLoop();
+        } else if ("ensureFallback".equals(cmd)) {
+            startSilentLoop();
+        } else if ("stopFallback".equals(cmd)) {
+            stopSilentLoop();
+        }
     try {
         android.media.session.MediaSession s = MediaSessionHolder.get();
         if (s != null) {

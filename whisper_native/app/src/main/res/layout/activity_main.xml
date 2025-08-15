@@ -215,6 +215,20 @@
         android:layout_marginBottom="10dp"
         android:orientation="horizontal">
 
+        <CheckBox
+            android:id="@+id/chkCaptureMedia"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Use earbud media controls"
+            android:checked="true" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="10dp"
+        android:orientation="horizontal">
+
         <Button
             android:id="@+id/btnVadTuning"
             android:layout_width="wrap_content"

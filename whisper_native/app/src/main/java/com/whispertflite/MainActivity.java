@@ -73,6 +73,7 @@ public class MainActivity extends AppCompatActivity {
     private Button btnSessionStop;     // new
     private Button btnVadTuning;       // new
     private Button btnSessionPauseResume; // new
+    private android.widget.CheckBox chkCaptureMedia; // new
 
     private Player mPlayer = null;
     private Recorder mRecorder = null;
@@ -89,6 +90,11 @@ public class MainActivity extends AppCompatActivity {
     private AudioManager audioManager; // manage audio focus for media buttons
     private AudioFocusRequest audioFocusRequest; // focus request (O+)
     private boolean hasAudioFocus = false;
+    private boolean mediaKeysObserved = false; // for conditional fallback
+    private Runnable fallbackClaimTask; // schedule AudioTrack fallback if needed
+    private Runnable inactivityReleaseTask; // release silent claim after idle
+    private final long fallbackDelayMs = 1200; // wait for keys before fallback
+    private final long inactivityTimeoutMs = 15_000; // stop fallback after idle
 
     private File sdcardDataFolder = null;
     private File selectedWaveFile = null;
@@ -266,6 +272,50 @@ public class MainActivity extends AppCompatActivity {
     btnSessionStop = findViewById(R.id.btnSessionStop);
     btnVadTuning = findViewById(R.id.btnVadTuning);
     btnSessionPauseResume = findViewById(R.id.btnSessionPauseResume);
+    chkCaptureMedia = findViewById(R.id.chkCaptureMedia);
+        chkCaptureMedia.setOnCheckedChangeListener((android.widget.CompoundButton buttonView, boolean isChecked) -> {
+            // If session is running, apply immediately
+            if (pipelineController != null && pipelineController.getMode() == PipelineController.Mode.SESSION) {
+                if (isChecked) {
+                    // Claim focus and activate session now
+                    if (requestAudioFocus()) {
+                        mediaSession.setActive(true);
+                        updatePlaybackState(PlaybackState.STATE_PLAYING);
+                    }
+                    try {
+                        android.content.Intent svc = new android.content.Intent(this, SessionService.class);
+                        svc.putExtra("command", "startNoAudio");
+                        ContextCompat.startForegroundService(this, svc);
+                    } catch (Throwable t) { Log.d(TAG, "Failed to start service on toggle: " + t.getMessage()); }
+                    mediaKeysObserved = false;
+                    if (fallbackClaimTask != null) handler.removeCallbacks(fallbackClaimTask);
+                    fallbackClaimTask = () -> {
+                        if (!mediaKeysObserved) {
+                            try {
+                                android.content.Intent svc2 = new android.content.Intent(this, SessionService.class);
+                                svc2.putExtra("command", "ensureFallback");
+                                ContextCompat.startForegroundService(this, svc2);
+                            } catch (Throwable t) { Log.d(TAG, "Fallback ensure on toggle failed: " + t.getMessage()); }
+                        }
+                    };
+                    handler.postDelayed(fallbackClaimTask, fallbackDelayMs);
+                    scheduleInactivityRelease();
+                } else {
+                    // Release focus and deactivate session now
+                    updatePlaybackState(PlaybackState.STATE_PAUSED);
+                    mediaSession.setActive(false);
+                    abandonAudioFocus();
+                    try {
+                        android.content.Intent svc = new android.content.Intent(this, SessionService.class);
+                        svc.putExtra("command", "stopFallback");
+                        ContextCompat.startForegroundService(this, svc);
+                        stopService(svc);
+                    } catch (Throwable t) { Log.d(TAG, "Failed to stop service on toggle: " + t.getMessage()); }
+                    if (fallbackClaimTask != null) handler.removeCallbacks(fallbackClaimTask);
+                    if (inactivityReleaseTask != null) handler.removeCallbacks(inactivityReleaseTask);
+                }
+            }
+        });
         frameEmitter = new FrameEmitter(this);
         pipelineController = new PipelineController(FrameEmitter.FRAME_SAMPLES, new PipelineController.Listener() {
             @Override public void onStateChanged(PipelineController.State state) { Log.d(TAG, "Pipeline state=" + state); handler.post(() -> tvStatus.setText(state.toString())); }
@@ -330,29 +380,47 @@ public class MainActivity extends AppCompatActivity {
             pipelineController.stop();
         });
 
-        // Session listen wiring (scaffold only; behavior added in next commit)
+        // Session listen wiring
         btnSessionStart.setOnClickListener(v -> {
             if (!frameEmitter.isRunning()) frameEmitter.start();
             pipelineController.startSession();
-            try {
-                android.content.Intent svc = new android.content.Intent(this, SessionService.class);
-                ContextCompat.startForegroundService(this, svc);
-            } catch (Throwable t) { Log.d(TAG, "Failed to start foreground service: " + t.getMessage()); }
-            if (requestAudioFocus()) {
-                mediaSession.setActive(true);
-                updatePlaybackState(PlaybackState.STATE_PLAYING);
-            }
-            // Brief silent playback to claim media controls on some devices
-            try {
-                File silent = ensureSilentWav(200);
-                if (silent != null && mPlayer != null && !mPlayer.isPlaying()) {
-                    mPlayer.initializePlayer(silent.getAbsolutePath());
-                    mPlayer.startPlayback();
-                    handler.postDelayed(() -> {
-                        try { if (mPlayer.isPlaying()) mPlayer.stopPlayback(); } catch (Exception ignore) {}
-                    }, 250);
+            mediaKeysObserved = false;
+            // Activate MediaSession + focus only if capture toggle ON
+            if (chkCaptureMedia.isChecked()) {
+                if (requestAudioFocus()) {
+                    mediaSession.setActive(true);
+                    updatePlaybackState(PlaybackState.STATE_PLAYING);
                 }
-            } catch (Exception e) { Log.d(TAG, "Silent claim failed: " + e.getMessage()); }
+            } else {
+                updatePlaybackState(PlaybackState.STATE_PAUSED);
+                mediaSession.setActive(false);
+                abandonAudioFocus();
+            }
+            // Conditionally start foreground service only if toggle is ON
+            if (chkCaptureMedia.isChecked()) {
+                try {
+                    android.content.Intent svc = new android.content.Intent(this, SessionService.class);
+                    svc.putExtra("command", "startNoAudio");
+                    ContextCompat.startForegroundService(this, svc);
+                } catch (Throwable t) { Log.d(TAG, "Failed to start foreground service: " + t.getMessage()); }
+            }
+            // Schedule fallback silent claim only if no keys arrive in time
+            if (chkCaptureMedia.isChecked()) {
+                if (fallbackClaimTask != null) handler.removeCallbacks(fallbackClaimTask);
+                fallbackClaimTask = () -> {
+                    if (!mediaKeysObserved) {
+                        Log.d(TAG, "No media keys observed; requesting fallback claim");
+                        try {
+                            android.content.Intent svc = new android.content.Intent(this, SessionService.class);
+                            svc.putExtra("command", "ensureFallback");
+                            ContextCompat.startForegroundService(this, svc);
+                        } catch (Throwable t) { Log.d(TAG, "Fallback ensure failed: " + t.getMessage()); }
+                    }
+                };
+                handler.postDelayed(fallbackClaimTask, fallbackDelayMs);
+            }
+            // Start inactivity timer to release fallback later
+            scheduleInactivityRelease();
             // Play short ready tone (200ms) and gate input while playing
             try {
                 if (toneGen == null) toneGen = new ToneGenerator(AudioManager.STREAM_MUSIC, 80);
@@ -375,6 +443,8 @@ public class MainActivity extends AppCompatActivity {
                 android.content.Intent svc = new android.content.Intent(this, SessionService.class);
                 stopService(svc);
             } catch (Throwable t) { Log.d(TAG, "Failed to stop foreground service: " + t.getMessage()); }
+            if (fallbackClaimTask != null) handler.removeCallbacks(fallbackClaimTask);
+            if (inactivityReleaseTask != null) handler.removeCallbacks(inactivityReleaseTask);
         });
 
     btnVadTuning.setOnClickListener(v -> showVadTuningDialog());
@@ -388,10 +458,17 @@ public class MainActivity extends AppCompatActivity {
                 if (!frameEmitter.isRunning()) frameEmitter.start();
                 pipelineController.resumeListening();
                 btnSessionPauseResume.setText("Pause");
-                if (requestAudioFocus()) {
-                    mediaSession.setActive(true);
+                if (chkCaptureMedia.isChecked()) {
+                    if (requestAudioFocus()) {
+                        mediaSession.setActive(true);
+                    }
+                    updatePlaybackState(PlaybackState.STATE_PLAYING);
+                } else {
+                    mediaSession.setActive(false);
+                    abandonAudioFocus();
+                    updatePlaybackState(PlaybackState.STATE_PAUSED);
                 }
-                updatePlaybackState(PlaybackState.STATE_PLAYING);
+                scheduleInactivityRelease();
             }
         });
     // MediaSession for tap-to-pause (earbud play/pause -> toggle session listening)
@@ -420,11 +497,24 @@ public class MainActivity extends AppCompatActivity {
         mediaSession.setCallback(new MediaSession.Callback() {
             @Override
             public boolean onMediaButtonEvent(android.content.Intent mediaButtonIntent) {
+                if (!chkCaptureMedia.isChecked()) {
+                    // Do not intercept when capture is disabled
+                    return super.onMediaButtonEvent(mediaButtonIntent);
+                }
                 Log.d(TAG, "onMediaButtonEvent: " + mediaButtonIntent);
                 KeyEvent keyEvent = mediaButtonIntent.getParcelableExtra(android.content.Intent.EXTRA_KEY_EVENT);
                 if (keyEvent != null && keyEvent.getAction() == KeyEvent.ACTION_DOWN) {
                     int code = keyEvent.getKeyCode();
                     Log.d(TAG, "Media key code: " + code);
+                    mediaKeysObserved = true;
+                    if (chkCaptureMedia.isChecked()) {
+                        try {
+                            android.content.Intent svc = new android.content.Intent(MainActivity.this, SessionService.class);
+                            svc.putExtra("command", "stopFallback");
+                            ContextCompat.startForegroundService(MainActivity.this, svc);
+                        } catch (Throwable t) { Log.d(TAG, "stopFallback on first key failed: " + t.getMessage()); }
+                    }
+                    scheduleInactivityRelease();
             if (code == KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE || code == KeyEvent.KEYCODE_HEADSETHOOK
                 || code == KeyEvent.KEYCODE_MEDIA_NEXT || code == KeyEvent.KEYCODE_MEDIA_PREVIOUS) {
                         if (pipelineController.getState() == com.whispertflite.frontend.PipelineController.State.LISTENING) {
@@ -452,6 +542,7 @@ public class MainActivity extends AppCompatActivity {
 
             @Override
             public void onPlay() {
+                if (!chkCaptureMedia.isChecked()) return;
                 // Treat as resume listening
                 if (!frameEmitter.isRunning()) frameEmitter.start();
                 pipelineController.resumeListening();
@@ -462,6 +553,7 @@ public class MainActivity extends AppCompatActivity {
 
             @Override
             public void onPause() {
+                if (!chkCaptureMedia.isChecked()) return;
                 // Treat as pause listening
                 pipelineController.pauseListening();
                 handler.post(() -> btnSessionPauseResume.setText("Resume"));
@@ -478,6 +570,19 @@ public class MainActivity extends AppCompatActivity {
 
         // for debugging
 //        testParallelProcessing();
+    }
+
+    private void scheduleInactivityRelease() {
+        if (!chkCaptureMedia.isChecked()) return;
+        if (inactivityReleaseTask != null) handler.removeCallbacks(inactivityReleaseTask);
+        inactivityReleaseTask = () -> {
+            try {
+                android.content.Intent svc = new android.content.Intent(this, SessionService.class);
+                svc.putExtra("command", "stopFallback");
+                ContextCompat.startForegroundService(this, svc);
+            } catch (Throwable t) { Log.d(TAG, "Inactivity stopFallback failed: " + t.getMessage()); }
+        };
+        handler.postDelayed(inactivityReleaseTask, inactivityTimeoutMs);
     }
 
     private void showVadTuningDialog() {
