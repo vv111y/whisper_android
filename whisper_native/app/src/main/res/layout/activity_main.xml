@@ -172,4 +172,82 @@
             android:text="Stop Wake" />
     </LinearLayout>
 
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="10dp"
+        android:orientation="horizontal">
+
+        <Button
+            android:id="@+id/btnSessionStart"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_margin="3dp"
+            android:layout_weight="1"
+            android:textSize="15sp"
+            android:background="@drawable/rounded_button_background"
+            android:text="Session Listen" />
+
+        <Button
+            android:id="@+id/btnSessionStop"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_margin="3dp"
+            android:layout_weight="1"
+            android:textSize="15sp"
+            android:background="@drawable/rounded_button_background"
+            android:text="Stop Session" />
+
+        <Button
+            android:id="@+id/btnSessionPauseResume"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_margin="3dp"
+            android:layout_weight="1"
+            android:textSize="15sp"
+            android:background="@drawable/rounded_button_background"
+            android:text="Pause" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="10dp"
+        android:orientation="horizontal">
+
+        <CheckBox
+            android:id="@+id/chkCaptureMedia"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Use earbud media controls"
+            android:checked="true" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="10dp"
+        android:orientation="horizontal">
+
+        <Button
+            android:id="@+id/btnVadTuning"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_margin="3dp"
+            android:layout_weight="1"
+            android:textSize="15sp"
+            android:background="@drawable/rounded_button_background"
+            android:text="VAD Tuning" />
+
+        <Button
+            android:id="@+id/btnValidateModel"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_margin="3dp"
+            android:layout_weight="1"
+            android:textSize="15sp"
+            android:background="@drawable/rounded_button_background"
+            android:text="Validate Model" />
+    </LinearLayout>
+
 </LinearLayout>

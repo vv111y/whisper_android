@@ -23,10 +23,15 @@ public class WhisperEngineNative implements WhisperEngine {
     @Override
     public boolean initialize(String modelPath, String vocabPath, boolean multilingual) {
         int ret = loadModel(modelPath, multilingual);
-        Log.d(TAG, "Model is loaded..." + modelPath);
-
-        mIsInitialized = true;
-        return true;
+        if (ret == 0) {
+            Log.d(TAG, "Model loaded: " + modelPath);
+            mIsInitialized = true;
+            return true;
+        } else {
+            Log.e(TAG, "Model load failed (code=" + ret + "): " + getLastError(nativePtr));
+            mIsInitialized = false;
+            return false;
+        }
     }
 
     @Override
@@ -36,12 +41,19 @@ public class WhisperEngineNative implements WhisperEngine {
 
     @Override
     public String transcribeBuffer(float[] samples) {
-        return transcribeBuffer(nativePtr, samples);
+    if (!mIsInitialized) return "[error] model not initialized";
+    return transcribeBuffer(nativePtr, samples);
     }
 
     @Override
     public String transcribeFile(String waveFile) {
-        return transcribeFile(nativePtr, waveFile);
+    if (!mIsInitialized) return "[error] model not initialized";
+    return transcribeFile(nativePtr, waveFile);
+    }
+
+    @Override
+    public String lastError() {
+        try { return getLastError(nativePtr); } catch (Throwable t) { return ""; }
     }
 
     private int loadModel(String modelPath, boolean isMultilingual) {
@@ -59,7 +71,15 @@ public class WhisperEngineNative implements WhisperEngine {
     // Native methods
     private native long createTFLiteEngine();
     private native int loadModel(long nativePtr, String modelPath, boolean isMultilingual);
+    private native int validateModel(long nativePtr, String modelPath, boolean isMultilingual);
+    private native String getLastError(long nativePtr);
     private native void freeModel(long nativePtr);
     private native String transcribeBuffer(long nativePtr, float[] samples);
     private native String transcribeFile(long nativePtr, String waveFile);
+
+    // Public helper to allow UI to validate a model without loading it persistently
+    public int validateModel(String path, boolean multilingual) {
+        // Safe validator that only verifies the flatbuffer; does not build an interpreter
+        return validateModel(nativePtr, path, multilingual);
+    }
 }

@@ -1,0 +1,116 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:padding="16dp">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        >
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Threshold"
+            android:textSize="14sp"/>
+        <View
+            android:layout_width="0dp"
+            android:layout_height="0dp"
+            android:layout_weight="1"/>
+        <TextView
+            android:id="@+id/txtThresholdVal"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textSize="14sp"
+            android:text="0.000"/>
+    </LinearLayout>
+
+    <SeekBar
+        android:id="@+id/seekThreshold"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:max="100"/>
+
+    <TextView
+        android:id="@+id/txtThresholdOpt"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Optimal: 0.035"
+        android:textSize="12sp"
+        android:textColor="@android:color/darker_gray"/>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
+        android:orientation="horizontal">
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Hangover (frames)"
+            android:textSize="14sp"/>
+        <View
+            android:layout_width="0dp"
+            android:layout_height="0dp"
+            android:layout_weight="1"/>
+        <TextView
+            android:id="@+id/txtHangoverVal"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textSize="14sp"
+            android:text="0"/>
+    </LinearLayout>
+
+    <SeekBar
+        android:id="@+id/seekHangover"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:max="100"/>
+
+    <TextView
+        android:id="@+id/txtHangoverOpt"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Optimal: 30"
+        android:textSize="12sp"
+        android:textColor="@android:color/darker_gray"/>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
+        android:orientation="horizontal">
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Start attack (frames)"
+            android:textSize="14sp"/>
+        <View
+            android:layout_width="0dp"
+            android:layout_height="0dp"
+            android:layout_weight="1"/>
+        <TextView
+            android:id="@+id/txtAttackVal"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textSize="14sp"
+            android:text="0"/>
+    </LinearLayout>
+
+    <SeekBar
+        android:id="@+id/seekAttack"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:max="10"/>
+
+    <TextView
+        android:id="@+id/txtAttackOpt"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Optimal: 3"
+        android:textSize="12sp"
+        android:textColor="@android:color/darker_gray"/>
+
+</LinearLayout>
