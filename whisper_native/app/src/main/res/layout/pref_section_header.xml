@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+	android:layout_width="match_parent"
+	android:layout_height="wrap_content"
+	android:orientation="vertical"
+	android:paddingStart="16dp"
+	android:paddingEnd="16dp"
+	android:paddingTop="6dp"
+	android:paddingBottom="6dp">
+
+	<TextView
+		android:id="@+id/pref_section_title"
+		android:layout_width="match_parent"
+		android:layout_height="wrap_content"
+		android:text=""
+		android:textStyle="bold"
+		android:textSize="12sp"
+		android:textColor="@android:color/darker_gray" />
+
+	<!-- Optional thin bottom divider for visual separation -->
+	<View
+		android:layout_width="match_parent"
+		android:layout_height="1dp"
+		android:layout_marginTop="4dp"
+		android:background="@android:color/darker_gray" />
+
+</LinearLayout>

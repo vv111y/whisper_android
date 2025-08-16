@@ -3,6 +3,10 @@
     <style name="Base.Theme.TFLiteAudio" parent="Theme.Material3.DayNight.NoActionBar">
         <!-- Customize your light theme here. -->
         <!-- <item name="colorPrimary">@color/my_light_primary</item> -->
+    <!-- Apply compact overlay to Preference screens -->
+    <item name="preferenceTheme">@style/PreferenceThemeOverlay.TFLiteCompact</item>
+    <!-- Use smaller SeekBars globally (affects Preferences' sliders) -->
+    <item name="seekBarStyle">@style/TFLite.Widget.SeekBar</item>
     </style>
 
     <style name="Theme.TFLiteAudio" parent="Base.Theme.TFLiteAudio" />

@@ -32,6 +32,8 @@ public class SettingsFragment extends PreferenceFragmentCompat {
     if (btnReset != null) btnReset.setOnPreferenceClickListener(p -> { resetDefaults(); return true; });
     if (btnSave != null) btnSave.setOnPreferenceClickListener(p -> { saveCurrentAsDefaults(); return true; });
     if (btnFactory != null) btnFactory.setOnPreferenceClickListener(p -> { factoryResetDefaults(); return true; });
+        // Also handle clicking the row Defaults button via performClick()
+        mode.setOnPreferenceClickListener(p -> { resetDefaults(); return true; });
     bindSummaries();
 
         // Populate model list from app's external files dir
@@ -78,16 +80,31 @@ public class SettingsFragment extends PreferenceFragmentCompat {
             } catch (Throwable ignore) {}
 
             modelList.setOnPreferenceChangeListener((pref, newVal) -> {
-                try {
                     String path = String.valueOf(newVal);
-                    // Update summary to filename only
-                    pref.setSummary(new java.io.File(path).getName());
-                    // Proactively ask MainActivity to reload if running
-                    com.whispertflite.MainActivity act = (com.whispertflite.MainActivity) getActivity();
-                    if (act != null) act.onModelPreferenceChanged(path);
-                } catch (Throwable ignore) {}
-                return true; // allow change
-            });
+                    // Auto-validate and block bad models
+                    try {
+                        android.content.Context ctx = requireContext();
+                        boolean isEnglishOnly = path.endsWith(".en.tflite");
+                        boolean isMultilingual = !isEnglishOnly;
+                        com.whispertflite.engine.WhisperEngineNative engine = new com.whispertflite.engine.WhisperEngineNative(ctx);
+                        int code = engine.validateModel(path, isMultilingual);
+                        if (code != 0) {
+                            String name = new java.io.File(path).getName();
+                            showDialog("Model", "Invalid: " + name + "\n" + engine.lastError());
+                            return false; // block selection (“ghost”)
+                        }
+                    } catch (Throwable t) {
+                        showDialog("Model", "Validation error: " + t.getMessage());
+                        return false;
+                    }
+                    // OK: update summary and notify MainActivity
+                    try {
+                        pref.setSummary(new java.io.File(path).getName());
+                        com.whispertflite.MainActivity act = (com.whispertflite.MainActivity) getActivity();
+                        if (act != null) act.onModelPreferenceChanged(path);
+                    } catch (Throwable ignore) {}
+                    return true;
+                });
         }
 
         if (validatePref != null) {
@@ -113,6 +130,15 @@ public class SettingsFragment extends PreferenceFragmentCompat {
                 return true;
             });
         }
+            // Bottom dual buttons (New defaults | Factory reset)
+            com.whispertflite.ui.pref.DualButtonsPreference dual = findPreference("pref_dual_bottom");
+            if (dual != null) {
+                dual.setOnPreferenceClickListener(p -> true);
+                dual.setListener(new com.whispertflite.ui.pref.DualButtonsPreference.Listener() {
+                    @Override public void onLeftClick(Preference self) { saveCurrentAsDefaults(); }
+                    @Override public void onRightClick(Preference self) { factoryResetDefaults(); }
+                });
+            }
 
         // Keep Recorder checkbox in sync when user toggles preference in Settings
         SwitchPreferenceCompat mediaToggle = findPreference("pref_capture_media");
@@ -177,7 +203,7 @@ public class SettingsFragment extends PreferenceFragmentCompat {
     setSeekValue("pref_min_arm_delay_ms", arm);
     setSeekValue("pref_inter_cooldown_ms", cool);
     setSeekValue("pref_max_capture_ms", maxc);
-    android.widget.Toast.makeText(getContext(), "Applied Command defaults", android.widget.Toast.LENGTH_SHORT).show();
+    // no toast
     }
 
     // Legacy: keep for internal use; no longer surfaced
@@ -225,7 +251,7 @@ public class SettingsFragment extends PreferenceFragmentCompat {
     setSeekValue("pref_min_arm_delay_ms", arm);
     setSeekValue("pref_inter_cooldown_ms", cool);
     setSeekValue("pref_max_capture_ms", maxc);
-    android.widget.Toast.makeText(getContext(), "Applied Chat defaults", android.widget.Toast.LENGTH_SHORT).show();
+    // no toast
     }
 
     private void saveDefaults(String profile) {
@@ -242,7 +268,7 @@ public class SettingsFragment extends PreferenceFragmentCompat {
         e.putInt("defaults_"+profile+"_cooldown", sp.getInt("pref_inter_cooldown_ms", 800));
         e.putInt("defaults_"+profile+"_max_capture", sp.getInt("pref_max_capture_ms", 12_000));
         e.apply();
-        android.widget.Toast.makeText(getContext(), "Saved as defaults ("+profile+")", android.widget.Toast.LENGTH_SHORT).show();
+    // no toast
     }
 
     private void bindSummaries() {
@@ -356,7 +382,7 @@ public class SettingsFragment extends PreferenceFragmentCompat {
     setSeekValue("pref_max_capture_ms", maxc);
     // Final pass: ensure any computed summaries or providers refresh from current mode values
     showModeValues(p);
-    android.widget.Toast.makeText(getContext(), "Defaults applied ("+ (p.equals("cmd")?"Command":"Chat") +")", android.widget.Toast.LENGTH_SHORT).show();
+    // no toast
     }
 
     private void saveCurrentAsDefaults() {
@@ -373,7 +399,7 @@ public class SettingsFragment extends PreferenceFragmentCompat {
         e.putInt("defaults_"+p+"_cooldown", sp.getInt("pref_inter_cooldown_ms", 800));
         e.putInt("defaults_"+p+"_max_capture", sp.getInt("pref_max_capture_ms", 12_000));
         e.apply();
-        android.widget.Toast.makeText(getContext(), "Saved new defaults ("+ (p.equals("cmd")?"Command":"Chat") +")", android.widget.Toast.LENGTH_SHORT).show();
+    // no toast
     }
     private android.content.SharedPreferences getPrefs() {
         return androidx.preference.PreferenceManager.getDefaultSharedPreferences(requireContext());
@@ -470,6 +496,6 @@ public class SettingsFragment extends PreferenceFragmentCompat {
     setSeekValue("pref_max_capture_ms", maxc);
     // Final pass: ensure any computed summaries or providers refresh from current mode values
     showModeValues(p);
-    android.widget.Toast.makeText(getContext(), "Factory defaults restored (" + (p.equals("cmd")?"Command":"Chat") + ")", android.widget.Toast.LENGTH_SHORT).show();
+    // no toast
     }
 }

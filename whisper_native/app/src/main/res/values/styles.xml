@@ -1,0 +1,49 @@
+<resources>
+    <!-- Smaller text appearances for preference titles and summaries -->
+    <style name="TextAppearance.TFLite.PreferenceTitle" parent="TextAppearance.Material3.TitleSmall">
+        <item name="android:textSize">13sp</item>
+    </style>
+
+    <style name="TextAppearance.TFLite.PreferenceSummary" parent="TextAppearance.Material3.BodySmall">
+        <item name="android:textSize">11sp</item>
+    </style>
+
+    <!-- Base Preference row with reduced vertical padding and height -->
+    <style name="TFLite.Preference" parent="Preference">
+        <item name="titleTextAppearance">@style/TextAppearance.TFLite.PreferenceTitle</item>
+        <item name="android:minHeight">40dp</item>
+        <item name="android:paddingTop">4dp</item>
+        <item name="android:paddingBottom">4dp</item>
+    </style>
+
+    <!-- Category title compact styling -->
+    <style name="TFLite.PreferenceCategory" parent="Preference.Category">
+        <item name="titleTextAppearance">@style/TextAppearance.TFLite.PreferenceTitle</item>
+        <item name="android:paddingTop">4dp</item>
+        <item name="android:paddingBottom">2dp</item>
+    </style>
+
+    <!-- Preference theme overlay to apply compact styles across the Settings screen -->
+    <style name="PreferenceThemeOverlay.TFLiteCompact" parent="PreferenceThemeOverlay.v14.Material">
+        <item name="preferenceStyle">@style/TFLite.Preference</item>
+        <item name="preferenceCategoryStyle">@style/TFLite.PreferenceCategory</item>
+    <item name="seekBarPreferenceStyle">@style/TFLite.Preference.SeekBarPreference</item>
+    </style>
+
+    <!-- Smaller, thinner SeekBar for tighter rows -->
+    <style name="TFLite.Widget.SeekBar" parent="Widget.AppCompat.SeekBar">
+        <item name="android:minHeight">16dp</item>
+        <item name="android:maxHeight">16dp</item>
+        <item name="trackThickness">2dp</item>
+        <item name="thumbRadius">8dp</item>
+        <item name="haloRadius">10dp</item>
+    </style>
+
+    <!-- SeekBarPreference row specifics -->
+    <style name="TFLite.Preference.SeekBarPreference" parent="Preference.SeekBarPreference.Material">
+        <item name="titleTextAppearance">@style/TextAppearance.TFLite.PreferenceTitle</item>
+        <item name="android:minHeight">40dp</item>
+        <item name="android:paddingTop">4dp</item>
+        <item name="android:paddingBottom">4dp</item>
+    </style>
+</resources>

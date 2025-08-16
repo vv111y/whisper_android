@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <PreferenceScreen xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:app="http://schemas.android.com/apk/res-auto">
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:padding="0dp">
 
     <PreferenceCategory android:title="Model &amp; Media">
         <SwitchPreferenceCompat
@@ -19,20 +20,16 @@
             app:useSimpleSummaryProvider="true"
             android:summary="Select the Whisper .tflite model" />
 
-        <Preference
-            android:key="pref_validate_model"
-            android:title="Validate model"
-            android:summary="Verify the selected model is compatible and report details" />
     </PreferenceCategory>
 
-    <PreferenceCategory android:title="Mode">
-        <com.whispertflite.ui.pref.ModeTogglePreference
-            android:key="pref_config_mode"
-            android:defaultValue="cmd" />
-        <com.whispertflite.ui.pref.ButtonPreference
-            android:key="pref_reset_defaults"
-            android:title="Defaults" />
-    </PreferenceCategory>
+    <Preference
+        android:key="pref_divider_1"
+        android:layout="@layout/pref_divider"
+        android:selectable="false" />
+
+    <com.whispertflite.ui.pref.ModeRowPreference
+        android:key="pref_config_mode"
+        android:defaultValue="cmd" />
 
     <PreferenceCategory android:title="VAD">
         <SeekBarPreference
@@ -41,6 +38,8 @@
             app:min="1"
             android:max="100"
             app:showSeekBarValue="true"
+            app:singleLineTitle="true"
+            app:iconSpaceReserved="false"
             android:defaultValue="35"
             android:summary="Energy threshold (maps ~0.005..0.1)" />
         <SeekBarPreference
@@ -49,6 +48,8 @@
             app:min="0"
             android:max="100"
             app:showSeekBarValue="true"
+            app:singleLineTitle="true"
+            app:iconSpaceReserved="false"
             android:defaultValue="30" />
         <SeekBarPreference
             android:key="pref_vad_attack"
@@ -56,6 +57,8 @@
             app:min="1"
             android:max="10"
             app:showSeekBarValue="true"
+            app:singleLineTitle="true"
+            app:iconSpaceReserved="false"
             android:defaultValue="3" />
     </PreferenceCategory>
 
@@ -66,6 +69,8 @@
             app:min="0"
             android:max="60"
             app:showSeekBarValue="true"
+            app:singleLineTitle="true"
+            app:iconSpaceReserved="false"
             android:defaultValue="18"
             android:summary="Frames kept before speech (~20ms each)" />
         <SeekBarPreference
@@ -74,6 +79,8 @@
             app:min="0"
             android:max="150"
             app:showSeekBarValue="true"
+            app:singleLineTitle="true"
+            app:iconSpaceReserved="false"
             android:defaultValue="35"
             android:summary="End-of-input merge window" />
         <SeekBarPreference
@@ -82,6 +89,8 @@
             app:min="0"
             android:max="2000"
             app:showSeekBarValue="true"
+            app:singleLineTitle="true"
+            app:iconSpaceReserved="false"
             android:defaultValue="600" />
         <SeekBarPreference
             android:key="pref_inter_cooldown_ms"
@@ -89,6 +98,8 @@
             app:min="0"
             android:max="3000"
             app:showSeekBarValue="true"
+            app:singleLineTitle="true"
+            app:iconSpaceReserved="false"
             android:defaultValue="800" />
         <SeekBarPreference
             android:key="pref_min_utter_frames"
@@ -96,6 +107,8 @@
             app:min="1"
             android:max="60"
             app:showSeekBarValue="true"
+            app:singleLineTitle="true"
+            app:iconSpaceReserved="false"
             android:defaultValue="18" />
         <SeekBarPreference
             android:key="pref_max_capture_ms"
@@ -103,17 +116,13 @@
             app:min="1000"
             android:max="120000"
             app:showSeekBarValue="true"
+            app:singleLineTitle="true"
+            app:iconSpaceReserved="false"
             android:defaultValue="12000"
             android:summary="Increase for multi-sentence chat (up to 120s)" />
     </PreferenceCategory>
 
-    <PreferenceCategory android:title="Defaults">
-        <com.whispertflite.ui.pref.ButtonPreference
-            android:key="pref_save_defaults"
-            android:title="New defaults" />
-        <com.whispertflite.ui.pref.ButtonPreference
-            android:key="pref_factory_reset"
-            android:title="Factory reset" />
-    </PreferenceCategory>
+    <com.whispertflite.ui.pref.DualButtonsPreference
+        android:key="pref_dual_bottom" />
 
 </PreferenceScreen>
