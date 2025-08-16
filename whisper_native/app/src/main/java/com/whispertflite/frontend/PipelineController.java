@@ -1,5 +1,7 @@
 package com.whispertflite.frontend;
 
+import android.os.SystemClock;
+
 import java.util.ArrayList;
 import java.util.ArrayDeque;
 import java.util.List;
@@ -34,6 +36,15 @@ public class PipelineController {
     // Internal merge: while CAPTURING, tolerate short silences before finalizing
     private int inCaptureSilenceFrames = 12; // ~240ms
     private int inCaptureSilenceCount = 0;
+    // Cooldown to avoid immediate re-triggers after finishing an utterance
+    private long lastCaptureEndUptimeMs = 0L;
+    private long interUtteranceCooldownMs = 800L; // 0.8s
+    // Arming delay after transitioning to LISTENING, to ignore initial pops/echo
+    private long listeningArmedAtUptimeMs = 0L;
+    private long minArmDelayMs = 600L; // 0.6s
+    // Require preceding silence before allowing a new capture (guards against earcon tail / init noise)
+    private int listeningSilenceFrames = 0;
+    private int requiredSilenceFramesBeforeCapture = 10; // ~200ms (10 * 20ms)
 
     public PipelineController(int frameSamples, Listener listener) {
         this.frameSamples = frameSamples;
@@ -49,11 +60,18 @@ public class PipelineController {
     private void setState(State s) {
         if (s != state) {
             state = s;
+            if (state == State.LISTENING) {
+                listeningArmedAtUptimeMs = android.os.SystemClock.uptimeMillis();
+                listeningSilenceFrames = 0;
+            }
             if (listener != null) listener.onStateChanged(state);
         }
     }
 
-    public void startListening() { setState(State.LISTENING); }
+    public void startListening() {
+        setState(State.LISTENING);
+        listeningArmedAtUptimeMs = android.os.SystemClock.uptimeMillis();
+    }
     public void stop() { setState(State.IDLE); captureFrames.clear(); }
 
     // Session-mode scaffolding (no-op transitions for commit 1)
@@ -76,6 +94,7 @@ public class PipelineController {
         inputGated = false;
         // Re-arm listening if we were idle; respect current mode
         if (state == State.IDLE) setState(State.LISTENING);
+    listeningSilenceFrames = 0;
     }
 
     // User-initiated pause/resume of session listening
@@ -87,12 +106,23 @@ public class PipelineController {
     public void resumeListening() {
         inputGated = false;
         setState(State.LISTENING);
+        listeningArmedAtUptimeMs = android.os.SystemClock.uptimeMillis();
+    listeningSilenceFrames = 0;
     }
 
     // Handle VAD speech start: in SESSION mode, begin capturing immediately (no wakeword)
     public void onSpeechStart() {
-    if (inputGated) return;
-    if (mode == Mode.SESSION && state == State.LISTENING) {
+        if (inputGated) return;
+        if (mode == Mode.SESSION && state == State.LISTENING) {
+            long now = SystemClock.uptimeMillis();
+            // Respect arming delay right after entering LISTENING
+            if (now - listeningArmedAtUptimeMs < minArmDelayMs) return;
+            // Require some preceding silence before we accept a new capture start
+            if (listeningSilenceFrames < requiredSilenceFramesBeforeCapture) return;
+            if (now - lastCaptureEndUptimeMs < interUtteranceCooldownMs) {
+                // Still in cooldown; ignore this start
+                return;
+            }
             captureFrames.clear();
             // copy pre-roll frames into capture
             for (float[] fr : preRoll) {
@@ -123,6 +153,12 @@ public class PipelineController {
             System.arraycopy(frame, 0, copy, 0, frame.length);
             preRoll.addLast(copy);
             while (preRoll.size() > preRollFrames) preRoll.pollFirst();
+            // Track silence frames while listening (before speech onset)
+            if (speech) {
+                listeningSilenceFrames = 0;
+            } else {
+                if (listeningSilenceFrames < 1000) listeningSilenceFrames++; // cap to avoid overflow
+            }
         }
         if (state == State.CAPTURING) {
             if (speech) {
@@ -159,6 +195,7 @@ public class PipelineController {
                 // Too short; discard and return to listening
                 captureFrames.clear();
                 capturingSpeechActive = false;
+                lastCaptureEndUptimeMs = SystemClock.uptimeMillis();
                 setState(State.LISTENING);
                 return;
             }
@@ -172,6 +209,7 @@ public class PipelineController {
     public void onTranscriptionComplete() {
         if (state == State.TRANSCRIBING) {
             // go back to listening for next wake
+            lastCaptureEndUptimeMs = SystemClock.uptimeMillis();
             setState(State.LISTENING);
             captureFrames.clear();
             capturingSpeechActive = false;

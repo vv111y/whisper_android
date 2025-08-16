@@ -1023,31 +1023,38 @@ public class MainActivity extends AppCompatActivity {
     // listening=false => short double beep (two 120ms beeps with slight gap)
     private void playStateTone(boolean listening) {
         if (pipelineController == null) return;
-        handler.post(() -> {
-            if (beepPlayer == null) beepPlayer = new BeepPlayer();
-            // Request transient focus only if we don't already hold session focus
-            requestToneFocusIfNeeded();
-            // Gate mic during short tones
-            pipelineController.gateInput(true);
-            if (listening) {
-                final int delayMs = 30;
-                handler.postDelayed(() -> { try { beepPlayer.playListeningBeep(); } catch (Exception ignore) {} }, delayMs);
+        // Gate immediately to avoid any frames slipping through before handler executes
+        pipelineController.gateInput(true);
+        if (beepPlayer == null) beepPlayer = new BeepPlayer();
+        // Request transient focus only if we don't already hold session focus
+        requestToneFocusIfNeeded();
+        if (listening) {
+            // Small pre-delay, but mic is already gated
+            final int delayMs = 30;
+            // Slightly extend gating window to cover room echo
+            final int totalGateMs = delayMs + 320; // ~0.32s total after delay
+            handler.postDelayed(() -> { try { beepPlayer.playListeningBeep(); } catch (Exception ignore) {} }, delayMs);
+            handler.postDelayed(() -> {
+                pipelineController.gateInput(false);
+                abandonToneFocus();
+            }, totalGateMs);
+        } else {
+            // Double beep total ~0.4s; add extra tail for safety
+            final int releaseMs = 460;
+            try {
+                beepPlayer.playIdleDoubleBeep(() -> {
+                    handler.postDelayed(() -> {
+                        pipelineController.gateInput(false);
+                        abandonToneFocus();
+                    }, 60);
+                });
+            } catch (Exception e) {
                 handler.postDelayed(() -> {
                     pipelineController.gateInput(false);
                     abandonToneFocus();
-                }, delayMs + 270);
-            } else {
-                try {
-                    beepPlayer.playIdleDoubleBeep(() -> {
-                        pipelineController.gateInput(false);
-                        abandonToneFocus();
-                    });
-                } catch (Exception e) {
-                    pipelineController.gateInput(false);
-                    abandonToneFocus();
-                }
+                }, releaseMs);
             }
-        });
+        }
     }
 
     static class SharedResource {
