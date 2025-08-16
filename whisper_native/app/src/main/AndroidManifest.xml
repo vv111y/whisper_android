@@ -32,5 +32,9 @@
             android:name=".SessionService"
             android:exported="false"
             android:foregroundServiceType="mediaPlayback" />
+
+        <activity android:name="com.whispertflite.ui.SettingsActivity"
+            android:exported="false"
+            android:label="Settings" />
     </application>
 </manifest>

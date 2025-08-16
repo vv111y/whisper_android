@@ -44,6 +44,14 @@ import com.whispertflite.frontend.VadEnergy;
 import com.whispertflite.frontend.WakewordDetector;
 import com.whispertflite.audio.BeepPlayer;
 import com.whispertflite.engine.WhisperEngineNative;
+import com.google.android.material.navigation.NavigationView;
+import androidx.drawerlayout.widget.DrawerLayout;
+import androidx.appcompat.app.ActionBarDrawerToggle;
+import androidx.appcompat.widget.Toolbar;
+import androidx.fragment.app.Fragment;
+import androidx.fragment.app.FragmentTransaction;
+import com.whispertflite.ui.StartFragment;
+import com.whispertflite.ui.ChatFragment;
 
 import java.io.File;
 import java.io.FileOutputStream;
@@ -101,6 +109,7 @@ public class MainActivity extends AppCompatActivity {
     private Runnable inactivityReleaseTask; // release silent claim after idle
     private final long fallbackDelayMs = 1200; // wait for keys before fallback
     private final long inactivityTimeoutMs = 15_000; // stop fallback after idle
+    private boolean normalizeBeforeTranscribe = true; // settings-driven
 
     private File sdcardDataFolder = null;
     private File selectedWaveFile = null;
@@ -115,6 +124,33 @@ public class MainActivity extends AppCompatActivity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
+
+        // Toolbar + Drawer
+        Toolbar toolbar = findViewById(R.id.toolbar);
+        setSupportActionBar(toolbar);
+        DrawerLayout drawerLayout = findViewById(R.id.drawer_layout);
+        ActionBarDrawerToggle toggle = new ActionBarDrawerToggle(this, drawerLayout, toolbar, R.string.app_name, R.string.app_name);
+        drawerLayout.addDrawerListener(toggle);
+        toggle.syncState();
+        NavigationView navView = findViewById(R.id.nav_view);
+        navView.setNavigationItemSelectedListener(item -> {
+            int id = item.getItemId();
+            if (id == R.id.nav_start) {
+                showFragment(new StartFragment());
+                findViewById(R.id.recorder_container).setVisibility(View.GONE);
+            } else if (id == R.id.nav_chat) {
+                showFragment(new ChatFragment());
+                findViewById(R.id.recorder_container).setVisibility(View.GONE);
+            } else if (id == R.id.nav_recorder) {
+                clearFragment();
+                findViewById(R.id.recorder_container).setVisibility(View.VISIBLE);
+            }
+            drawerLayout.closeDrawers();
+            return true;
+        });
+        View header = navView.getHeaderView(0);
+        View btnSettings = header.findViewById(R.id.btnSettings);
+        if (btnSettings != null) btnSettings.setOnClickListener(v -> openSettings());
 
         // Call the method to copy specific file types from assets to data folder
         sdcardDataFolder = this.getExternalFilesDir(null);
@@ -336,11 +372,11 @@ public class MainActivity extends AppCompatActivity {
                 }
             }
             @Override public void onWakeTriggered(double score) { Log.d(TAG, "Pipeline wake triggered score=" + score); }
-            @Override public void onUtteranceReady(float[] samples) {
+        @Override public void onUtteranceReady(float[] samples) {
                 // Write temp WAV to reuse existing file transcription path
                 try {
                     // Light normalization: center and peak-normalize to -1..1 with a cap
-                    float[] norm = normalizeAudio(samples);
+            float[] norm = normalizeBeforeTranscribe ? normalizeAudio(samples) : samples;
                     File tmp = new File(sdcardDataFolder, "wake_capture.wav");
                     com.whispertflite.utils.WaveUtil.createWaveFile(tmp.getAbsolutePath(), to16Bit(norm), 16000,1,2);
                     if (mWhisper == null) initModel(selectedTfliteFile);
@@ -599,6 +635,55 @@ public class MainActivity extends AppCompatActivity {
 
         // for debugging
 //        testParallelProcessing();
+    }
+
+    private void showFragment(Fragment f) {
+        FragmentTransaction ft = getSupportFragmentManager().beginTransaction();
+        ft.replace(R.id.fragment_container, f);
+        ft.commitAllowingStateLoss();
+    }
+
+    private void clearFragment() {
+        Fragment current = getSupportFragmentManager().findFragmentById(R.id.fragment_container);
+        if (current != null) {
+            getSupportFragmentManager().beginTransaction().remove(current).commitAllowingStateLoss();
+        }
+    }
+
+    private void openSettings() {
+        startActivity(new android.content.Intent(this, com.whispertflite.ui.SettingsActivity.class));
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        // Apply preferences to components
+        try {
+            android.content.SharedPreferences prefs = androidx.preference.PreferenceManager.getDefaultSharedPreferences(this);
+            boolean captureMedia = prefs.getBoolean("pref_capture_media", true);
+            boolean normalize = prefs.getBoolean("pref_normalize_audio", true);
+            // Apply media capture toggle to checkbox and current session behavior
+            if (chkCaptureMedia != null) chkCaptureMedia.setChecked(captureMedia);
+            // VAD mappings
+            if (vadEnergy != null) {
+                int thrProg = prefs.getInt("pref_vad_threshold", 35);
+                float thr = 0.005f + (thrProg / 100f) * (0.1f - 0.005f);
+                vadEnergy.setThreshold(thr);
+                vadEnergy.setHangoverFrames(prefs.getInt("pref_vad_hangover", 30));
+                vadEnergy.setStartAttackFrames(prefs.getInt("pref_vad_attack", 3));
+            }
+            // Pipeline tunables
+            if (pipelineController != null) {
+                pipelineController.setPreRollFrames(prefs.getInt("pref_pre_roll_frames", 18));
+                pipelineController.setInCaptureSilenceFrames(prefs.getInt("pref_incap_silence_frames", 35));
+                pipelineController.setMinArmDelayMs(prefs.getInt("pref_min_arm_delay_ms", 600));
+                pipelineController.setInterUtteranceCooldownMs(prefs.getInt("pref_inter_cooldown_ms", 800));
+                pipelineController.setMinUtteranceFrames(prefs.getInt("pref_min_utter_frames", 18));
+                pipelineController.setMaxCaptureMs(prefs.getInt("pref_max_capture_ms", 12_000));
+            }
+            // Store normalize flag for future use; current implementation always normalizes before WAV write
+            this.normalizeBeforeTranscribe = normalize;
+        } catch (Throwable ignore) {}
     }
 
     private void scheduleInactivityRelease() {

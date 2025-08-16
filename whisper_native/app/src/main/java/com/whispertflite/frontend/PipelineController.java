@@ -49,6 +49,7 @@ public class PipelineController {
     // Safety: cap max capture duration to avoid runaways on noisy environments
     private long captureStartUptimeMs = 0L;
     private long maxCaptureMs = 12_000L; // 12 seconds
+    private int minUtteranceFrames = 18; // ~360ms
 
     public PipelineController(int frameSamples, Listener listener) {
         this.frameSamples = frameSamples;
@@ -230,8 +231,8 @@ public class PipelineController {
     }
 
     private void finalizeCapture() {
-        // Enforce a minimal utterance duration (~360ms) to reduce false positives
-        int minFrames = 18; // 18 * 20ms = 360ms
+        // Enforce a minimal utterance duration to reduce false positives
+        int minFrames = Math.max(1, minUtteranceFrames);
         if (captureFrames.size() < minFrames) {
             // Too short; discard and return to listening
             captureFrames.clear();
@@ -244,4 +245,15 @@ public class PipelineController {
         setState(State.TRANSCRIBING);
         if (listener != null) listener.onUtteranceReady(pcm);
     }
+
+    // Live tuning setters
+    public void setPreRollFrames(int frames) {
+        this.preRollFrames = Math.max(0, frames);
+        preRoll.clear();
+    }
+    public void setInCaptureSilenceFrames(int frames) { this.inCaptureSilenceFrames = Math.max(0, frames); }
+    public void setInterUtteranceCooldownMs(long ms) { this.interUtteranceCooldownMs = Math.max(0L, ms); }
+    public void setMinArmDelayMs(long ms) { this.minArmDelayMs = Math.max(0L, ms); }
+    public void setMaxCaptureMs(long ms) { this.maxCaptureMs = Math.max(1000L, ms); }
+    public void setMinUtteranceFrames(int frames) { this.minUtteranceFrames = Math.max(1, frames); }
 }
