@@ -29,12 +29,12 @@ public class PipelineController {
 
     // Pre-roll buffer: keep last N frames while LISTENING to include leading phonemes
     private final ArrayDeque<float[]> preRoll = new ArrayDeque<>();
-    private int preRollFrames = 10; // ~200ms if frames are 20ms
+    private int preRollFrames = 18; // ~360ms if frames are 20ms
 
     // Input gating: when true, drop/ignore all mic-driven events to avoid barge-in during output
     private boolean inputGated = false;
     // Internal merge: while CAPTURING, tolerate short silences before finalizing
-    private int inCaptureSilenceFrames = 12; // ~240ms
+    private int inCaptureSilenceFrames = 35; // ~700ms to allow short sentence pauses
     private int inCaptureSilenceCount = 0;
     // Cooldown to avoid immediate re-triggers after finishing an utterance
     private long lastCaptureEndUptimeMs = 0L;
@@ -44,7 +44,11 @@ public class PipelineController {
     private long minArmDelayMs = 600L; // 0.6s
     // Require preceding silence before allowing a new capture (guards against earcon tail / init noise)
     private int listeningSilenceFrames = 0;
-    private int requiredSilenceFramesBeforeCapture = 10; // ~200ms (10 * 20ms)
+    private int requiredSilenceFramesBeforeCapture = 6; // ~120ms to reduce clipped onsets
+
+    // Safety: cap max capture duration to avoid runaways on noisy environments
+    private long captureStartUptimeMs = 0L;
+    private long maxCaptureMs = 12_000L; // 12 seconds
 
     public PipelineController(int frameSamples, Listener listener) {
         this.frameSamples = frameSamples;
@@ -132,6 +136,7 @@ public class PipelineController {
             }
             capturingSpeechActive = false;
             setState(State.CAPTURING);
+            captureStartUptimeMs = now;
         }
     }
 
@@ -161,6 +166,12 @@ public class PipelineController {
             }
         }
         if (state == State.CAPTURING) {
+            long now = SystemClock.uptimeMillis();
+            if (capturingSpeechActive && (now - captureStartUptimeMs) > maxCaptureMs) {
+                // Force finalize to keep UX responsive
+                finalizeCapture();
+                return;
+            }
             if (speech) {
                 // store copy
                 float[] copy = new float[frame.length];
@@ -176,6 +187,10 @@ public class PipelineController {
                     float[] copy = new float[frame.length];
                     System.arraycopy(frame, 0, copy, 0, frame.length);
                     captureFrames.add(copy);
+                } else {
+                    // Silence exceeded merge window: finalize here proactively
+                    finalizeCapture();
+                    return;
                 }
             }
         }
@@ -189,20 +204,7 @@ public class PipelineController {
                 // ignore this end; capturing continues until a longer pause happens
                 return;
             }
-            // Enforce a minimal utterance duration (~300ms) to reduce false positives
-            int minFrames = 15; // 15 * 20ms = 300ms
-            if (captureFrames.size() < minFrames) {
-                // Too short; discard and return to listening
-                captureFrames.clear();
-                capturingSpeechActive = false;
-                lastCaptureEndUptimeMs = SystemClock.uptimeMillis();
-                setState(State.LISTENING);
-                return;
-            }
-            // finalize utterance
-            float[] pcm = flatten();
-            setState(State.TRANSCRIBING);
-            if (listener != null) listener.onUtteranceReady(pcm);
+            finalizeCapture();
         }
     }
 
@@ -225,5 +227,21 @@ public class PipelineController {
             idx += fr.length;
         }
         return out;
+    }
+
+    private void finalizeCapture() {
+        // Enforce a minimal utterance duration (~360ms) to reduce false positives
+        int minFrames = 18; // 18 * 20ms = 360ms
+        if (captureFrames.size() < minFrames) {
+            // Too short; discard and return to listening
+            captureFrames.clear();
+            capturingSpeechActive = false;
+            lastCaptureEndUptimeMs = SystemClock.uptimeMillis();
+            setState(State.LISTENING);
+            return;
+        }
+        float[] pcm = flatten();
+        setState(State.TRANSCRIBING);
+        if (listener != null) listener.onUtteranceReady(pcm);
     }
 }

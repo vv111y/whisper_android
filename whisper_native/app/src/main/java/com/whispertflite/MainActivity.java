@@ -339,8 +339,10 @@ public class MainActivity extends AppCompatActivity {
             @Override public void onUtteranceReady(float[] samples) {
                 // Write temp WAV to reuse existing file transcription path
                 try {
+                    // Light normalization: center and peak-normalize to -1..1 with a cap
+                    float[] norm = normalizeAudio(samples);
                     File tmp = new File(sdcardDataFolder, "wake_capture.wav");
-                    com.whispertflite.utils.WaveUtil.createWaveFile(tmp.getAbsolutePath(), to16Bit(samples), 16000,1,2);
+                    com.whispertflite.utils.WaveUtil.createWaveFile(tmp.getAbsolutePath(), to16Bit(norm), 16000,1,2);
                     if (mWhisper == null) initModel(selectedTfliteFile);
                     startTranscription(tmp.getAbsolutePath());
                 } catch (Exception e) { Log.d(TAG, "Failed to write wake capture wav: " + e.getMessage()); }
@@ -1002,6 +1004,27 @@ public class MainActivity extends AppCompatActivity {
             out[idx++] = (byte)(v & 0xFF);
             out[idx++] = (byte)((v >> 8) & 0xFF);
         }
+        return out;
+    }
+
+    private float[] normalizeAudio(float[] in) {
+        if (in == null || in.length == 0) return in;
+        // DC offset removal (simple mean subtraction)
+        double sum = 0;
+        for (float v : in) sum += v;
+        float mean = (float)(sum / in.length);
+        float peak = 0f;
+        float[] out = new float[in.length];
+        for (int i = 0; i < in.length; i++) {
+            float v = in[i] - mean;
+            out[i] = v;
+            float a = Math.abs(v);
+            if (a > peak) peak = a;
+        }
+        if (peak < 1e-6f) return out;
+        // Peak normalize to 0.9 to avoid clipping
+        float gain = 0.9f / peak;
+        for (int i = 0; i < out.length; i++) out[i] *= gain;
         return out;
     }
 
