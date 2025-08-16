@@ -70,7 +70,10 @@ public class Whisper {
 
     public void loadModel(String modelPath, String vocabPath, boolean isMultilingual) {
         try {
-            mWhisperEngine.initialize(modelPath, vocabPath, isMultilingual);
+            boolean ok = mWhisperEngine.initialize(modelPath, vocabPath, isMultilingual);
+            if (!ok) {
+                sendUpdate("Model initialization failed");
+            }
         } catch (IOException e) {
             Log.e(TAG, "Error initializing model...", e);
             sendUpdate("Model initialization failed");
