@@ -2,7 +2,7 @@
 <PreferenceScreen xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto">
 
-    <PreferenceCategory android:title="Model & Media">
+    <PreferenceCategory android:title="Model &amp; Media">
         <SwitchPreferenceCompat
             android:key="pref_capture_media"
             android:title="Use earbud media controls"
@@ -19,20 +19,23 @@
             android:key="pref_vad_threshold"
             android:title="Threshold"
             app:min="1"
-            app:max="100"
+            android:max="100"
+            app:showSeekBarValue="true"
             android:defaultValue="35"
             android:summary="Energy threshold (maps ~0.005..0.1)" />
         <SeekBarPreference
             android:key="pref_vad_hangover"
             android:title="Hangover frames"
             app:min="0"
-            app:max="100"
+            android:max="100"
+            app:showSeekBarValue="true"
             android:defaultValue="30" />
         <SeekBarPreference
             android:key="pref_vad_attack"
             android:title="Start attack frames"
             app:min="1"
-            app:max="10"
+            android:max="10"
+            app:showSeekBarValue="true"
             android:defaultValue="3" />
     </PreferenceCategory>
 
@@ -41,39 +44,45 @@
             android:key="pref_pre_roll_frames"
             android:title="Pre-roll frames"
             app:min="0"
-            app:max="60"
+            android:max="60"
+            app:showSeekBarValue="true"
             android:defaultValue="18"
             android:summary="Frames kept before speech (~20ms each)" />
         <SeekBarPreference
             android:key="pref_incap_silence_frames"
             android:title="In-capture silence frames"
             app:min="0"
-            app:max="150"
+            android:max="150"
+            app:showSeekBarValue="true"
             android:defaultValue="35"
             android:summary="End-of-input merge window" />
         <SeekBarPreference
             android:key="pref_min_arm_delay_ms"
             android:title="Min arm delay (ms)"
             app:min="0"
-            app:max="2000"
+            android:max="2000"
+            app:showSeekBarValue="true"
             android:defaultValue="600" />
         <SeekBarPreference
             android:key="pref_inter_cooldown_ms"
             android:title="Inter-utterance cooldown (ms)"
             app:min="0"
-            app:max="3000"
+            android:max="3000"
+            app:showSeekBarValue="true"
             android:defaultValue="800" />
         <SeekBarPreference
             android:key="pref_min_utter_frames"
             android:title="Min utterance frames"
             app:min="1"
-            app:max="60"
+            android:max="60"
+            app:showSeekBarValue="true"
             android:defaultValue="18" />
         <SeekBarPreference
             android:key="pref_max_capture_ms"
             android:title="Max capture (ms)"
             app:min="1000"
-            app:max="120000"
+            android:max="120000"
+            app:showSeekBarValue="true"
             android:defaultValue="12000"
             android:summary="Increase for multi-sentence chat (up to 120s)" />
     </PreferenceCategory>
