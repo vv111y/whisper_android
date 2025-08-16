@@ -8,6 +8,7 @@
 #include "tensorflow/lite/model.h"
 #include "tensorflow/lite/optional_debug_tools.h"
 #include "tensorflow/lite/delegates/gpu/delegate.h"
+#include "tensorflow/lite/schema/schema_generated.h"
 
 #include "TFLiteEngine.h"
 #include "input_features.h"
@@ -122,7 +123,9 @@ int TFLiteEngine:: loadModel(const char *modelPath, const bool isMultilingual) {
         // Open the TFLite model file for reading
         std::ifstream modelFile(modelPath, std::ios::binary | std::ios::ate);
         if (!modelFile.is_open()) {
-            std::cerr << "Unable to open model file: " << modelPath << std::endl;
+            std::string err = std::string("Unable to open model file: ") + modelPath;
+            std::cerr << err << std::endl;
+            setError(err);
             return -1;
         }
 
@@ -137,32 +140,80 @@ int TFLiteEngine:: loadModel(const char *modelPath, const bool isMultilingual) {
         if (modelFile.read(buffer, size)) {
             modelFile.close();
         } else {
-            std::cerr << "Error reading model data from file." << std::endl;
+            std::string err = "Error reading model data from file.";
+            std::cerr << err << std::endl;
+            setError(err);
         }
 
         g_whisper_tflite.size = size;
         g_whisper_tflite.buffer = buffer;
 
-        g_whisper_tflite.model = tflite::FlatBufferModel::BuildFromBuffer(g_whisper_tflite.buffer, g_whisper_tflite.size);
-        TFLITE_MINIMAL_CHECK(g_whisper_tflite.model != nullptr);
+        // Verify the flatbuffer before building the model to avoid crashes on malformed/unsupported models
+        g_whisper_tflite.model = tflite::FlatBufferModel::VerifyAndBuildFromBuffer(g_whisper_tflite.buffer, g_whisper_tflite.size);
+        if (!g_whisper_tflite.model) {
+            std::string err = "Model flatbuffer verification failed or incompatible .tflite";
+            std::cerr << err << std::endl;
+            setError(err);
+            delete[] buffer;
+            g_whisper_tflite.buffer = nullptr;
+            return -2;
+        }
 
         // Build the interpreter with the InterpreterBuilder.
         tflite::InterpreterBuilder builder(*(g_whisper_tflite.model), g_whisper_tflite.resolver);
 
         builder(&(g_whisper_tflite.interpreter));
-        TFLITE_MINIMAL_CHECK(g_whisper_tflite.interpreter != nullptr);
+        if (!g_whisper_tflite.interpreter) {
+            std::string err = "Failed to build TFLite Interpreter (unsupported ops or resolver)";
+            std::cerr << err << std::endl;
+            setError(err);
+            g_whisper_tflite.model.reset();
+            delete[] buffer;
+            g_whisper_tflite.buffer = nullptr;
+            return -3;
+        }
 
         // Allocate tensor buffers.
-        TFLITE_MINIMAL_CHECK(g_whisper_tflite.interpreter->AllocateTensors() == kTfLiteOk);
+        if (g_whisper_tflite.interpreter->AllocateTensors() != kTfLiteOk) {
+            std::string err = "AllocateTensors failed (model input/output mismatch or memory)";
+            std::cerr << err << std::endl;
+            setError(err);
+            g_whisper_tflite.interpreter.reset();
+            g_whisper_tflite.model.reset();
+            delete[] buffer;
+            g_whisper_tflite.buffer = nullptr;
+            return -4;
+        }
 
         g_whisper_tflite.input = g_whisper_tflite.interpreter->typed_input_tensor<float>(0);
         g_whisper_tflite.is_whisper_tflite_initialized = true;
+    setError("");
 
         gettimeofday(&end_time, NULL);
         std::cout << "Time taken for TFLite initialization: " << TIME_DIFF_MS(start_time, end_time) << " ms" << std::endl;
     }
 
     std::cout << "Exiting " << __func__ << "()" << std::endl;
+    return 0;
+}
+
+int TFLiteEngine::validateModel(const char* modelPath, const bool /*isMultilingual*/) {
+    // Safe check: verify the flatbuffer only; avoid building interpreter to prevent crashes
+    std::ifstream modelFile(modelPath, std::ios::binary | std::ios::ate);
+    if (!modelFile.is_open()) { setError(std::string("Unable to open model file: ") + modelPath); return -1; }
+    std::streamsize size = modelFile.tellg();
+    modelFile.seekg(0, std::ios::beg);
+    std::unique_ptr<char[]> buffer(new char[size]);
+    if (!modelFile.read(buffer.get(), size)) { setError("Error reading model data from file."); return -1; }
+    modelFile.close();
+
+    // Verify the buffer using TFLite schema
+    std::unique_ptr<tflite::FlatBufferModel> model = tflite::FlatBufferModel::VerifyAndBuildFromBuffer(buffer.get(), size);
+    if (!model) {
+        setError("Model flatbuffer verification failed or incompatible .tflite");
+        return -2;
+    }
+    setError("");
     return 0;
 }
 

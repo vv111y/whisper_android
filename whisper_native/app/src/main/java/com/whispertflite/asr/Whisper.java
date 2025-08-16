@@ -72,7 +72,8 @@ public class Whisper {
         try {
             boolean ok = mWhisperEngine.initialize(modelPath, vocabPath, isMultilingual);
             if (!ok) {
-                sendUpdate("Model initialization failed");
+                String detail = mWhisperEngine.lastError();
+                sendUpdate("Model initialization failed" + (detail != null && !detail.isEmpty() ? (": " + detail) : ""));
             }
         } catch (IOException e) {
             Log.e(TAG, "Error initializing model...", e);

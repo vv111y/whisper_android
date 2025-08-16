@@ -43,6 +43,7 @@ import com.whispertflite.frontend.PipelineController;
 import com.whispertflite.frontend.VadEnergy;
 import com.whispertflite.frontend.WakewordDetector;
 import com.whispertflite.audio.BeepPlayer;
+import com.whispertflite.engine.WhisperEngineNative;
 
 import java.io.File;
 import java.io.FileOutputStream;
@@ -74,6 +75,7 @@ public class MainActivity extends AppCompatActivity {
     private Button btnSessionStop;     // new
     private Button btnVadTuning;       // new
     private Button btnSessionPauseResume; // new
+    private Button btnValidateModel; // new
     private android.widget.CheckBox chkCaptureMedia; // new
 
     private Player mPlayer = null;
@@ -276,6 +278,7 @@ public class MainActivity extends AppCompatActivity {
     btnSessionStop = findViewById(R.id.btnSessionStop);
     btnVadTuning = findViewById(R.id.btnVadTuning);
     btnSessionPauseResume = findViewById(R.id.btnSessionPauseResume);
+    btnValidateModel = findViewById(R.id.btnValidateModel);
     chkCaptureMedia = findViewById(R.id.chkCaptureMedia);
         chkCaptureMedia.setOnCheckedChangeListener((android.widget.CompoundButton buttonView, boolean isChecked) -> {
             // If session is running, apply immediately
@@ -448,6 +451,28 @@ public class MainActivity extends AppCompatActivity {
             if (fallbackClaimTask != null) handler.removeCallbacks(fallbackClaimTask);
             if (inactivityReleaseTask != null) handler.removeCallbacks(inactivityReleaseTask);
         });
+
+    // Validate model (load-only check with detailed error)
+    btnValidateModel.setOnClickListener(v -> {
+        try {
+        boolean isMultilingualModel = !(selectedTfliteFile.getName().endsWith(ENGLISH_ONLY_MODEL_EXTENSION));
+        WhisperEngineNative engine = new WhisperEngineNative(this);
+        int code = engine.validateModel(selectedTfliteFile.getAbsolutePath(), isMultilingualModel);
+        String msg = code == 0 ? ("Model OK: " + selectedTfliteFile.getName())
+            : ("Invalid: code " + code + "\n" + engine.lastError());
+        new AlertDialog.Builder(this)
+            .setTitle("Model Validation")
+            .setMessage(msg)
+            .setPositiveButton("OK", null)
+            .show();
+        } catch (Throwable t) {
+        new AlertDialog.Builder(this)
+            .setTitle("Model Validation")
+            .setMessage("Validation error: " + t.getMessage())
+            .setPositiveButton("OK", null)
+            .show();
+        }
+    });
 
     btnVadTuning.setOnClickListener(v -> showVadTuningDialog());
 
@@ -787,23 +812,29 @@ public class MainActivity extends AppCompatActivity {
         File vocabFile = new File(sdcardDataFolder, vocabFileName);
 
         mWhisper = new Whisper(this);
-        mWhisper.loadModel(modelFile, vocabFile, isMultilingualModel);
         mWhisper.setListener(new Whisper.WhisperListener() {
             @Override
             public void onUpdateReceived(String message) {
                 Log.d(TAG, "Update is received, Message: " + message);
+                // Always reflect Whisper updates in the status line (init errors, etc.)
+                handler.post(() -> tvStatus.setText(message));
+
+                // If model initialization failed, surface details in a dialog too
+                if (message != null && message.startsWith("Model initialization failed")) {
+                    handler.post(() -> new AlertDialog.Builder(MainActivity.this)
+                            .setTitle("Model Init Error")
+                            .setMessage(message)
+                            .setPositiveButton("OK", null)
+                            .show());
+                }
 
                 if (message.equals(Whisper.MSG_PROCESSING)) {
-                    handler.post(() -> tvStatus.setText(message));
                     handler.post(() -> tvResult.setText(""));
                     startTime = System.currentTimeMillis();
-                } if (message.equals(Whisper.MSG_PROCESSING_DONE)) {
-//                    handler.post(() -> tvStatus.setText(message));
+                } else if (message.equals(Whisper.MSG_PROCESSING_DONE)) {
                     // for testing
-                    if (loopTesting)
-                        transcriptionSync.sendSignal();
+                    if (loopTesting) transcriptionSync.sendSignal();
                 } else if (message.equals(Whisper.MSG_FILE_NOT_FOUND)) {
-                    handler.post(() -> tvStatus.setText(message));
                     Log.d(TAG, "File not found error...!");
                 }
             }
@@ -821,6 +852,7 @@ public class MainActivity extends AppCompatActivity {
                 });
             }
         });
+
         mWhisper.setCompletionListener(() -> {
             runOnUiThread(() -> {
                 if (pipelineController != null) {
@@ -828,6 +860,8 @@ public class MainActivity extends AppCompatActivity {
                 }
             });
         });
+        // Load model AFTER listeners are registered so init errors surface in UI
+        mWhisper.loadModel(modelFile, vocabFile, isMultilingualModel);
     }
 
     private void deinitModel() {

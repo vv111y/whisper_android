@@ -28,7 +28,7 @@ public class WhisperEngineNative implements WhisperEngine {
             mIsInitialized = true;
             return true;
         } else {
-            Log.e(TAG, "Model load failed (code=" + ret + "): " + modelPath);
+            Log.e(TAG, "Model load failed (code=" + ret + "): " + getLastError(nativePtr));
             mIsInitialized = false;
             return false;
         }
@@ -51,6 +51,11 @@ public class WhisperEngineNative implements WhisperEngine {
     return transcribeFile(nativePtr, waveFile);
     }
 
+    @Override
+    public String lastError() {
+        try { return getLastError(nativePtr); } catch (Throwable t) { return ""; }
+    }
+
     private int loadModel(String modelPath, boolean isMultilingual) {
         return loadModel(nativePtr, modelPath, isMultilingual);
     }
@@ -66,7 +71,15 @@ public class WhisperEngineNative implements WhisperEngine {
     // Native methods
     private native long createTFLiteEngine();
     private native int loadModel(long nativePtr, String modelPath, boolean isMultilingual);
+    private native int validateModel(long nativePtr, String modelPath, boolean isMultilingual);
+    private native String getLastError(long nativePtr);
     private native void freeModel(long nativePtr);
     private native String transcribeBuffer(long nativePtr, float[] samples);
     private native String transcribeFile(long nativePtr, String waveFile);
+
+    // Public helper to allow UI to validate a model without loading it persistently
+    public int validateModel(String path, boolean multilingual) {
+        // Safe validator that only verifies the flatbuffer; does not build an interpreter
+        return validateModel(nativePtr, path, multilingual);
+    }
 }

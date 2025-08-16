@@ -88,6 +88,9 @@ public class WhisperEngineJava implements WhisperEngine {
         return null;
     }
 
+    @Override
+    public String lastError() { return ""; }
+
     // Load TFLite model
     private void loadModel(String modelPath) throws IOException {
         FileInputStream fileInputStream = new FileInputStream(modelPath);

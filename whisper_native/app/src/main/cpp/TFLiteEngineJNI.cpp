@@ -21,6 +21,24 @@ Java_com_whispertflite_engine_WhisperEngineNative_loadModel(JNIEnv *env, jobject
     return static_cast<jint>(result);
 }
 
+// JNI method to validate a model (no persistent state changes)
+JNIEXPORT jint JNICALL
+Java_com_whispertflite_engine_WhisperEngineNative_validateModel(JNIEnv *env, jobject thiz, jlong nativePtr, jstring modelPath, jboolean isMultilingual) {
+    TFLiteEngine *engine = reinterpret_cast<TFLiteEngine *>(nativePtr);
+    const char *cModelPath = env->GetStringUTFChars(modelPath, NULL);
+    int result = engine->validateModel(cModelPath, isMultilingual);
+    env->ReleaseStringUTFChars(modelPath, cModelPath);
+    return static_cast<jint>(result);
+}
+
+// JNI method to get the last error string
+JNIEXPORT jstring JNICALL
+Java_com_whispertflite_engine_WhisperEngineNative_getLastError(JNIEnv *env, jobject thiz, jlong nativePtr) {
+    TFLiteEngine *engine = reinterpret_cast<TFLiteEngine *>(nativePtr);
+    const char* err = engine->getLastError();
+    return env->NewStringUTF(err ? err : "");
+}
+
 // JNI method to free the model
 JNIEXPORT void JNICALL
 Java_com_whispertflite_engine_WhisperEngineNative_freeModel(JNIEnv *env, jobject thiz, jlong nativePtr) {
