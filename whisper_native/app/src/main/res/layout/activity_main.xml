@@ -24,42 +24,26 @@
             android:id="@+id/fragment_container"
             android:layout_width="match_parent"
             android:layout_height="0dp"
-            android:layout_weight="1"/>
+            android:layout_weight="1"
+            android:visibility="gone"/>
 
         <!-- Existing recorder UI below; will be toggled by menu selection -->
-        <ScrollView
+        <FrameLayout
             android:id="@+id/recorder_container"
             android:layout_width="match_parent"
-            android:layout_height="wrap_content">
-            <LinearLayout
+            android:layout_height="0dp"
+            android:layout_weight="1">
+            <ScrollView
+                android:id="@+id/recorder_scroll"
                 android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="vertical"
-                android:padding="16dp">
+                android:layout_height="match_parent">
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="16dp">
 
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginBottom="16dp"
-        android:orientation="horizontal">
-<!--        android:visibility="gone">-->
-
-        <TextView
-            android:layout_width="60dp"
-            android:layout_height="wrap_content"
-            android:textSize="15sp"
-            android:textColor="@color/colorPrimary"
-            android:text="Select model: "
-            android:layout_weight="1"
-            android:layout_marginEnd="8dp" />
-
-        <Spinner
-            android:id="@+id/spnrTfliteFiles"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="5"
-            android:layout_marginEnd="4dp" />
-    </LinearLayout>
+    <!-- Model selection moved to Settings -->
 
     <LinearLayout
         android:layout_width="match_parent"
@@ -88,7 +72,9 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_marginBottom="10dp"
-        android:orientation="horizontal">
+        android:orientation="horizontal"
+        android:paddingTop="4dp"
+        android:paddingBottom="8dp">
 
         <Button
             android:id="@+id/btnRecord"
@@ -151,28 +137,11 @@
         android:layout_marginTop="16dp"
         android:layout_marginBottom="16dp" />
 
-    <ScrollView
-        android:id="@+id/scrollView"
+    <TextView
+        android:id="@+id/tvResult"
         android:layout_width="match_parent"
-        android:layout_height="0dp"
-        android:layout_weight="1">
-
-        <TextView
-            android:id="@+id/tvResult"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:textSize="17sp" />
-    </ScrollView>
-
-    <!-- Add Floating Action Button -->
-    <com.google.android.material.floatingactionbutton.FloatingActionButton
-        android:id="@+id/fabCopy"
-        android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_gravity="bottom|end"
-        android:layout_margin="16dp"
-        android:src="@android:drawable/ic_menu_save"
-        android:contentDescription="Copy" />
+        android:textSize="17sp" />
 
     <LinearLayout
         android:layout_width="match_parent"
@@ -252,35 +221,20 @@
             android:checked="true" />
     </LinearLayout>
 
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginBottom="10dp"
-        android:orientation="horizontal">
+    <!-- VAD tuning and Validate Model moved to Settings -->
 
-        <Button
-            android:id="@+id/btnVadTuning"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_margin="3dp"
-            android:layout_weight="1"
-            android:textSize="15sp"
-            android:background="@drawable/rounded_button_background"
-            android:text="VAD Tuning" />
-
-        <Button
-            android:id="@+id/btnValidateModel"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_margin="3dp"
-            android:layout_weight="1"
-            android:textSize="15sp"
-            android:background="@drawable/rounded_button_background"
-            android:text="Validate Model" />
-    </LinearLayout>
-
-            </LinearLayout>
-        </ScrollView>
+                </LinearLayout>
+            </ScrollView>
+            <!-- Floating Action Button over content -->
+            <com.google.android.material.floatingactionbutton.FloatingActionButton
+                android:id="@+id/fabCopy"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="bottom|end"
+                android:layout_margin="16dp"
+                android:src="@android:drawable/ic_menu_save"
+                android:contentDescription="Copy" />
+        </FrameLayout>
     </LinearLayout>
 
     <com.google.android.material.navigation.NavigationView

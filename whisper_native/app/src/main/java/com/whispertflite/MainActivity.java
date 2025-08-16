@@ -18,8 +18,6 @@ import android.widget.Button;
 import android.widget.Spinner;
 import android.widget.TextView;
 import android.app.AlertDialog;
-import android.view.LayoutInflater;
-import android.widget.SeekBar;
 import android.view.KeyEvent;
 import android.media.AudioManager;
 import android.media.AudioAttributes;
@@ -81,9 +79,7 @@ public class MainActivity extends AppCompatActivity {
     private Button btnWakeListenStop;  // new
     private Button btnSessionStart;    // new
     private Button btnSessionStop;     // new
-    private Button btnVadTuning;       // new
     private Button btnSessionPauseResume; // new
-    private Button btnValidateModel; // new
     private android.widget.CheckBox chkCaptureMedia; // new
 
     private Player mPlayer = null;
@@ -133,17 +129,20 @@ public class MainActivity extends AppCompatActivity {
         drawerLayout.addDrawerListener(toggle);
         toggle.syncState();
         NavigationView navView = findViewById(R.id.nav_view);
-        navView.setNavigationItemSelectedListener(item -> {
+    navView.setNavigationItemSelectedListener(item -> {
             int id = item.getItemId();
             if (id == R.id.nav_start) {
-                showFragment(new StartFragment());
-                findViewById(R.id.recorder_container).setVisibility(View.GONE);
+        showFragment(new StartFragment());
+        findViewById(R.id.recorder_container).setVisibility(View.GONE);
+        findViewById(R.id.fragment_container).setVisibility(View.VISIBLE);
             } else if (id == R.id.nav_chat) {
-                showFragment(new ChatFragment());
-                findViewById(R.id.recorder_container).setVisibility(View.GONE);
+        showFragment(new ChatFragment());
+        findViewById(R.id.recorder_container).setVisibility(View.GONE);
+        findViewById(R.id.fragment_container).setVisibility(View.VISIBLE);
             } else if (id == R.id.nav_recorder) {
                 clearFragment();
-                findViewById(R.id.recorder_container).setVisibility(View.VISIBLE);
+        findViewById(R.id.fragment_container).setVisibility(View.GONE);
+        findViewById(R.id.recorder_container).setVisibility(View.VISIBLE);
             }
             drawerLayout.closeDrawers();
             return true;
@@ -159,23 +158,10 @@ public class MainActivity extends AppCompatActivity {
         ArrayList<File> tfliteFiles = getFilesWithExtension(sdcardDataFolder, ".tflite");
         ArrayList<File> waveFiles = getFilesWithExtension(sdcardDataFolder, ".wav");
 
-        // Initialize default model to use
-        selectedTfliteFile = new File(sdcardDataFolder, DEFAULT_MODEL_TO_USE);
+    // Initialize default model to use (can be overridden by Settings)
+    selectedTfliteFile = new File(sdcardDataFolder, DEFAULT_MODEL_TO_USE);
 
-        Spinner spinnerTflite = findViewById(R.id.spnrTfliteFiles);
-        spinnerTflite.setAdapter(getFileArrayAdapter(tfliteFiles));
-        spinnerTflite.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
-            @Override
-            public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
-                deinitModel();
-                selectedTfliteFile = (File) parent.getItemAtPosition(position);
-            }
-
-            @Override
-            public void onNothingSelected(AdapterView<?> parent) {
-                // Handle case when nothing is selected, if needed
-            }
-        });
+    // Model selection moved to Settings
 
         Spinner spinnerWave = findViewById(R.id.spnrWaveFiles);
         spinnerWave.setAdapter(getFileArrayAdapter(waveFiles));
@@ -312,11 +298,13 @@ public class MainActivity extends AppCompatActivity {
     btnWakeListenStop = findViewById(R.id.btnWakeListenStop);
     btnSessionStart = findViewById(R.id.btnSessionStart);
     btnSessionStop = findViewById(R.id.btnSessionStop);
-    btnVadTuning = findViewById(R.id.btnVadTuning);
     btnSessionPauseResume = findViewById(R.id.btnSessionPauseResume);
-    btnValidateModel = findViewById(R.id.btnValidateModel);
     chkCaptureMedia = findViewById(R.id.chkCaptureMedia);
         chkCaptureMedia.setOnCheckedChangeListener((android.widget.CompoundButton buttonView, boolean isChecked) -> {
+            try {
+                androidx.preference.PreferenceManager.getDefaultSharedPreferences(this)
+                        .edit().putBoolean("pref_capture_media", isChecked).apply();
+            } catch (Throwable ignore) {}
             // If session is running, apply immediately
             if (pipelineController != null && pipelineController.getMode() == PipelineController.Mode.SESSION) {
                 if (isChecked) {
@@ -428,6 +416,7 @@ public class MainActivity extends AppCompatActivity {
         btnWakeListenStart.setOnClickListener(v -> {
             if (!frameEmitter.isRunning()) frameEmitter.start();
             pipelineController.startListening();
+            applyProfile(false); // command-style listen (no chat capture)
         });
         btnWakeListenStop.setOnClickListener(v -> {
             if (frameEmitter.isRunning()) frameEmitter.stop();
@@ -438,6 +427,7 @@ public class MainActivity extends AppCompatActivity {
         btnSessionStart.setOnClickListener(v -> {
             if (!frameEmitter.isRunning()) frameEmitter.start();
             pipelineController.startSession();
+            applyProfile(false); // command defaults by default
             mediaKeysObserved = false;
             // Activate MediaSession + focus only if capture toggle ON
             if (chkCaptureMedia.isChecked()) {
@@ -490,29 +480,7 @@ public class MainActivity extends AppCompatActivity {
             if (inactivityReleaseTask != null) handler.removeCallbacks(inactivityReleaseTask);
         });
 
-    // Validate model (load-only check with detailed error)
-    btnValidateModel.setOnClickListener(v -> {
-        try {
-        boolean isMultilingualModel = !(selectedTfliteFile.getName().endsWith(ENGLISH_ONLY_MODEL_EXTENSION));
-        WhisperEngineNative engine = new WhisperEngineNative(this);
-        int code = engine.validateModel(selectedTfliteFile.getAbsolutePath(), isMultilingualModel);
-        String msg = code == 0 ? ("Model OK: " + selectedTfliteFile.getName())
-            : ("Invalid: code " + code + "\n" + engine.lastError());
-        new AlertDialog.Builder(this)
-            .setTitle("Model Validation")
-            .setMessage(msg)
-            .setPositiveButton("OK", null)
-            .show();
-        } catch (Throwable t) {
-        new AlertDialog.Builder(this)
-            .setTitle("Model Validation")
-            .setMessage("Validation error: " + t.getMessage())
-            .setPositiveButton("OK", null)
-            .show();
-        }
-    });
-
-    btnVadTuning.setOnClickListener(v -> showVadTuningDialog());
+    // Model validation and VAD tuning moved to Settings
 
         btnSessionPauseResume.setOnClickListener(v -> {
             if (pipelineController.getState() == PipelineController.State.LISTENING) {
@@ -637,6 +605,29 @@ public class MainActivity extends AppCompatActivity {
 //        testParallelProcessing();
     }
 
+    private void applyProfile(boolean chatMode) {
+        android.content.SharedPreferences prefs = androidx.preference.PreferenceManager.getDefaultSharedPreferences(this);
+        String p = chatMode ? "chat_" : "cmd_";
+        // VAD
+        if (vadEnergy != null) {
+            // Threshold is stored as 1..100 slider position mapping; keep same scale
+            int thrProg = prefs.getInt(p + "vad_threshold", prefs.getInt("pref_vad_threshold", 35));
+            float thr = 0.005f + (thrProg / 100f) * (0.1f - 0.005f);
+            vadEnergy.setThreshold(thr);
+            vadEnergy.setHangoverFrames(prefs.getInt(p + "vad_hangover", prefs.getInt("pref_vad_hangover", 30)));
+            vadEnergy.setStartAttackFrames(prefs.getInt(p + "vad_attack", prefs.getInt("pref_vad_attack", 3)));
+        }
+        // Pipeline
+        if (pipelineController != null) {
+            pipelineController.setPreRollFrames(prefs.getInt(p + "pre_roll_frames", prefs.getInt("pref_pre_roll_frames", 18)));
+            pipelineController.setInCaptureSilenceFrames(prefs.getInt(p + "incap_silence_frames", prefs.getInt("pref_incap_silence_frames", 35)));
+            pipelineController.setMinArmDelayMs(prefs.getInt(p + "min_arm_delay_ms", prefs.getInt("pref_min_arm_delay_ms", 600)));
+            pipelineController.setInterUtteranceCooldownMs(prefs.getInt(p + "inter_cooldown_ms", prefs.getInt("pref_inter_cooldown_ms", 800)));
+            pipelineController.setMinUtteranceFrames(prefs.getInt(p + "min_utter_frames", prefs.getInt("pref_min_utter_frames", 18)));
+            pipelineController.setMaxCaptureMs(prefs.getInt(p + "max_capture_ms", prefs.getInt("pref_max_capture_ms", 12_000)));
+        }
+    }
+
     private void showFragment(Fragment f) {
         FragmentTransaction ft = getSupportFragmentManager().beginTransaction();
         ft.replace(R.id.fragment_container, f);
@@ -654,6 +645,25 @@ public class MainActivity extends AppCompatActivity {
         startActivity(new android.content.Intent(this, com.whispertflite.ui.SettingsActivity.class));
     }
 
+    // Called by Settings to immediately apply a new selected model
+    public void onModelPreferenceChanged(String newPath) {
+        try {
+            if (newPath == null) return;
+            File f = new File(newPath);
+            if (!f.exists() || !f.isFile()) return;
+            if (selectedTfliteFile == null || !f.equals(selectedTfliteFile)) {
+                deinitModel();
+            }
+            selectedTfliteFile = f;
+            // Optionally, eager-initialize if a session is active and no model loaded
+            if (pipelineController != null && mWhisper == null) {
+                initModel(selectedTfliteFile);
+            }
+        } catch (Throwable t) {
+            Log.d(TAG, "onModelPreferenceChanged error: " + t.getMessage());
+        }
+    }
+
     @Override
     protected void onResume() {
         super.onResume();
@@ -662,6 +672,19 @@ public class MainActivity extends AppCompatActivity {
             android.content.SharedPreferences prefs = androidx.preference.PreferenceManager.getDefaultSharedPreferences(this);
             boolean captureMedia = prefs.getBoolean("pref_capture_media", true);
             boolean normalize = prefs.getBoolean("pref_normalize_audio", true);
+            String modelPath = prefs.getString("pref_model_file", null);
+            if (modelPath != null) {
+                try {
+                    java.io.File f = new java.io.File(modelPath);
+                    if (f.exists() && f.isFile()) {
+                        // deinit if changed
+                        if (selectedTfliteFile == null || !f.equals(selectedTfliteFile)) {
+                            deinitModel();
+                        }
+                        selectedTfliteFile = f;
+                    }
+                } catch (Throwable ignore) {}
+            }
             // Apply media capture toggle to checkbox and current session behavior
             if (chkCaptureMedia != null) chkCaptureMedia.setChecked(captureMedia);
             // VAD mappings
@@ -699,84 +722,7 @@ public class MainActivity extends AppCompatActivity {
         handler.postDelayed(inactivityReleaseTask, inactivityTimeoutMs);
     }
 
-    private void showVadTuningDialog() {
-        if (vadEnergy == null) return;
-        LayoutInflater inflater = LayoutInflater.from(this);
-        View view = inflater.inflate(R.layout.dialog_vad_tuning, null);
-        SeekBar seekThr = view.findViewById(R.id.seekThreshold);
-        SeekBar seekHang = view.findViewById(R.id.seekHangover);
-        SeekBar seekAtk = view.findViewById(R.id.seekAttack);
-    TextView txtThrVal = view.findViewById(R.id.txtThresholdVal);
-    TextView txtHangVal = view.findViewById(R.id.txtHangoverVal);
-    TextView txtAtkVal = view.findViewById(R.id.txtAttackVal);
-
-        // Map threshold 0.005..0.1 to 0..100
-        float thr = vadEnergy.getThreshold();
-        int thrProg = (int)Math.max(0, Math.min(100, Math.round((thr - 0.005f) / (0.1f - 0.005f) * 100f)));
-        seekThr.setProgress(thrProg);
-    seekThr.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
-            @Override public void onProgressChanged(SeekBar sb, int p, boolean fromUser) {
-                float v = 0.005f + (p / 100f) * (0.1f - 0.005f);
-                vadEnergy.setThreshold(v);
-        txtThrVal.setText(String.format(java.util.Locale.US, "%.3f", v));
-            }
-            @Override public void onStartTrackingTouch(SeekBar seekBar) {}
-            @Override public void onStopTrackingTouch(SeekBar seekBar) {}
-        });
-
-        int hang = vadEnergy.getHangoverFrames();
-        seekHang.setProgress(Math.max(0, Math.min(100, hang)));
-        seekHang.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
-            @Override public void onProgressChanged(SeekBar sb, int p, boolean fromUser) { vadEnergy.setHangoverFrames(p); txtHangVal.setText(String.valueOf(p)); }
-            @Override public void onStartTrackingTouch(SeekBar seekBar) {}
-            @Override public void onStopTrackingTouch(SeekBar seekBar) {}
-        });
-
-        int atk = vadEnergy.getStartAttackFrames();
-        seekAtk.setProgress(Math.max(1, Math.min(10, atk)));
-        seekAtk.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
-            @Override public void onProgressChanged(SeekBar sb, int p, boolean fromUser) { int v = Math.max(1, p); vadEnergy.setStartAttackFrames(v); txtAtkVal.setText(String.valueOf(v)); }
-            @Override public void onStartTrackingTouch(SeekBar seekBar) {}
-            @Override public void onStopTrackingTouch(SeekBar seekBar) {}
-        });
-
-        // Initialize value labels
-        txtThrVal.setText(String.format(java.util.Locale.US, "%.3f", vadEnergy.getThreshold()));
-        txtHangVal.setText(String.valueOf(vadEnergy.getHangoverFrames()));
-        txtAtkVal.setText(String.valueOf(vadEnergy.getStartAttackFrames()));
-
-        AlertDialog dialog = new AlertDialog.Builder(this)
-                .setTitle("VAD Tuning")
-                .setView(view)
-                .setPositiveButton("Close", null)
-                .setNeutralButton("Reset", null)
-                .create();
-        dialog.setOnShowListener(dlg -> {
-            android.widget.Button resetBtn = dialog.getButton(AlertDialog.BUTTON_NEUTRAL);
-            if (resetBtn != null) {
-                resetBtn.setOnClickListener(v2 -> {
-                    // Tuned defaults
-                    float thrDef = 0.035f;
-                    int hangDef = 30;
-                    int atkDef = 3;
-                    // Apply
-                    vadEnergy.setThreshold(thrDef);
-                    vadEnergy.setHangoverFrames(hangDef);
-                    vadEnergy.setStartAttackFrames(atkDef);
-                    // Update UI
-                    int thrProgDef = (int)Math.max(0, Math.min(100, Math.round((thrDef - 0.005f) / (0.1f - 0.005f) * 100f)));
-                    seekThr.setProgress(thrProgDef);
-                    seekHang.setProgress(hangDef);
-                    seekAtk.setProgress(atkDef);
-                    txtThrVal.setText(String.format(java.util.Locale.US, "%.3f", thrDef));
-                    txtHangVal.setText(String.valueOf(hangDef));
-                    txtAtkVal.setText(String.valueOf(atkDef));
-                    // Do not dismiss dialog
-                });
-            }
-        });
-        dialog.show();
-    }
+    // Removed legacy showVadTuningDialog(); VAD is tuned via Settings now.
 
     private void updatePlaybackState(int state) {
         long actions = PlaybackState.ACTION_PLAY

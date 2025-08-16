@@ -12,6 +12,26 @@
             android:key="pref_normalize_audio"
             android:title="Normalize captured audio"
             android:defaultValue="true" />
+
+        <ListPreference
+            android:key="pref_model_file"
+            android:title="Model file"
+            app:useSimpleSummaryProvider="true"
+            android:summary="Select the Whisper .tflite model" />
+
+        <Preference
+            android:key="pref_validate_model"
+            android:title="Validate model"
+            android:summary="Verify the selected model is compatible and report details" />
+    </PreferenceCategory>
+
+    <PreferenceCategory android:title="Mode">
+        <com.whispertflite.ui.pref.ModeTogglePreference
+            android:key="pref_config_mode"
+            android:defaultValue="cmd" />
+        <com.whispertflite.ui.pref.ButtonPreference
+            android:key="pref_reset_defaults"
+            android:title="Defaults" />
     </PreferenceCategory>
 
     <PreferenceCategory android:title="VAD">
@@ -87,15 +107,13 @@
             android:summary="Increase for multi-sentence chat (up to 120s)" />
     </PreferenceCategory>
 
-    <PreferenceCategory android:title="Profiles">
-        <Preference
-            android:key="pref_apply_router"
-            android:title="Apply: Command Router"
-            android:summary="Short utterances, quick finalize" />
-        <Preference
-            android:key="pref_apply_chat"
-            android:title="Apply: Chatbot"
-            android:summary="Longer end-of-input and max capture" />
+    <PreferenceCategory android:title="Defaults">
+        <com.whispertflite.ui.pref.ButtonPreference
+            android:key="pref_save_defaults"
+            android:title="New defaults" />
+        <com.whispertflite.ui.pref.ButtonPreference
+            android:key="pref_factory_reset"
+            android:title="Factory reset" />
     </PreferenceCategory>
 
 </PreferenceScreen>

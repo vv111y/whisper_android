@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string-array name="config_mode_entries">
+        <item>Command</item>
+        <item>Chat</item>
+    </string-array>
+    <string-array name="config_mode_values">
+        <item>cmd</item>
+        <item>chat</item>
+    </string-array>
+</resources>
