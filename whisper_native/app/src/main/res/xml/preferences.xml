@@ -22,6 +22,26 @@
 
     </PreferenceCategory>
 
+    <PreferenceCategory android:title="Text-to-Speech">
+        <SwitchPreferenceCompat
+            android:key="pref_tts_enabled"
+            android:title="Enable spoken feedback"
+            android:defaultValue="true" />
+
+        <ListPreference
+            android:key="pref_tts_interrupt"
+            android:title="Interrupt policy"
+            android:defaultValue="flush"
+            app:entries="@array/tts_interrupt_entries"
+            app:entryValues="@array/tts_interrupt_values"
+            app:useSimpleSummaryProvider="true" />
+
+        <SwitchPreferenceCompat
+            android:key="pref_tts_double_tap_stop"
+            android:title="Double‑tap to stop TTS"
+            android:defaultValue="true" />
+    </PreferenceCategory>
+
     <Preference
         android:key="pref_divider_1"
         android:layout="@layout/pref_divider"

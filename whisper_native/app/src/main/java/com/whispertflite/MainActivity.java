@@ -50,6 +50,7 @@ import androidx.fragment.app.Fragment;
 import androidx.fragment.app.FragmentTransaction;
 import com.whispertflite.ui.StartFragment;
 import com.whispertflite.ui.ChatFragment;
+import com.whispertflite.tts.TTSManager;
 
 import java.io.File;
 import java.io.FileOutputStream;
@@ -100,6 +101,7 @@ public class MainActivity extends AppCompatActivity {
     private AudioFocusRequest toneFocusRequest; // transient focus for tones
     private boolean toneFocusHeld = false;
     private BeepPlayer beepPlayer;
+    private TTSManager ttsManager; // system TTS
     private boolean mediaKeysObserved = false; // for conditional fallback
     private Runnable fallbackClaimTask; // schedule AudioTrack fallback if needed
     private Runnable inactivityReleaseTask; // release silent claim after idle
@@ -472,6 +474,7 @@ public class MainActivity extends AppCompatActivity {
             updatePlaybackState(PlaybackState.STATE_STOPPED);
             mediaSession.setActive(false);
             abandonAudioFocus();
+            if (ttsManager != null) ttsManager.stop();
             try {
                 android.content.Intent svc = new android.content.Intent(this, SessionService.class);
                 stopService(svc);
@@ -550,6 +553,13 @@ public class MainActivity extends AppCompatActivity {
                     scheduleInactivityRelease();
             if (code == KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE || code == KeyEvent.KEYCODE_HEADSETHOOK
                 || code == KeyEvent.KEYCODE_MEDIA_NEXT || code == KeyEvent.KEYCODE_MEDIA_PREVIOUS) {
+                        // Double-tap to stop TTS if enabled; else toggle listening
+                        if (shouldStopTtsOnDoubleTap() && isDoubleTap(keyEvent)) {
+                            if (ttsManager != null && ttsManager.isSpeaking()) {
+                                ttsManager.stop();
+                                return true;
+                            }
+                        }
                         if (pipelineController.getState() == com.whispertflite.frontend.PipelineController.State.LISTENING) {
                             pipelineController.pauseListening();
                             handler.post(() -> btnSessionPauseResume.setText("Resume"));
@@ -565,6 +575,10 @@ public class MainActivity extends AppCompatActivity {
                         handler.post(() -> btnSessionPauseResume.setText("Pause"));
                         return true;
                     } else if (code == KeyEvent.KEYCODE_MEDIA_PAUSE) {
+                        if (shouldStopTtsOnDoubleTap() && ttsManager != null && ttsManager.isSpeaking()) {
+                            ttsManager.stop();
+                            return true;
+                        }
                         pipelineController.pauseListening();
                         handler.post(() -> btnSessionPauseResume.setText("Resume"));
                         return true;
@@ -591,6 +605,20 @@ public class MainActivity extends AppCompatActivity {
                 pipelineController.pauseListening();
                 handler.post(() -> btnSessionPauseResume.setText("Resume"));
                 updatePlaybackState(PlaybackState.STATE_PAUSED);
+
+                // Initialize TTS
+                ttsManager = new TTSManager(this, new TTSManager.Listener() {
+                    @Override public void onTtsStart(String utteranceId) {
+                        if (pipelineController != null) pipelineController.onOutputStart();
+                    }
+                    @Override public void onTtsDone(String utteranceId) {
+                        if (pipelineController != null) pipelineController.onOutputEnd();
+                    }
+                    @Override public void onTtsError(String utteranceId, String message) {
+                        if (pipelineController != null) pipelineController.onOutputEnd();
+                    }
+                });
+                applyTtsPrefs();
             }
 
             // No onPlayPause in Callback; handled via onMediaButtonEvent above
@@ -672,6 +700,8 @@ public class MainActivity extends AppCompatActivity {
             android.content.SharedPreferences prefs = androidx.preference.PreferenceManager.getDefaultSharedPreferences(this);
             boolean captureMedia = prefs.getBoolean("pref_capture_media", true);
             boolean normalize = prefs.getBoolean("pref_normalize_audio", true);
+            // TTS prefs
+            applyTtsPrefs();
             String modelPath = prefs.getString("pref_model_file", null);
             if (modelPath != null) {
                 try {
@@ -836,6 +866,7 @@ public class MainActivity extends AppCompatActivity {
         } catch (Exception ignore) {}
         abandonAudioFocus();
     try { if (beepPlayer != null) { beepPlayer.release(); beepPlayer = null; } } catch (Exception ignore) {}
+    try { if (ttsManager != null) { ttsManager.shutdown(); ttsManager = null; } } catch (Exception ignore) {}
     }
 
     // Model initialization
@@ -968,6 +999,43 @@ public class MainActivity extends AppCompatActivity {
 
     private void stopTranscription() {
         mWhisper.stop();
+    }
+
+    private void applyTtsPrefs() {
+        try {
+            android.content.SharedPreferences prefs = androidx.preference.PreferenceManager.getDefaultSharedPreferences(this);
+            boolean enabled = prefs.getBoolean("pref_tts_enabled", true);
+            String pol = prefs.getString("pref_tts_interrupt", "flush");
+            if (ttsManager != null) {
+                ttsManager.setEnabled(enabled);
+                if ("queue".equals(pol)) {
+                    ttsManager.setPolicy(TTSManager.Policy.QUEUE);
+                } else if ("flush_state".equals(pol)) {
+                    ttsManager.setPolicy(TTSManager.Policy.FLUSH_IF_SPEAKING);
+                } else {
+                    ttsManager.setPolicy(TTSManager.Policy.FLUSH);
+                }
+            }
+        } catch (Throwable ignore) {}
+    }
+
+    private boolean shouldStopTtsOnDoubleTap() {
+        try {
+            return androidx.preference.PreferenceManager.getDefaultSharedPreferences(this)
+                    .getBoolean("pref_tts_double_tap_stop", true);
+        } catch (Throwable t) { return true; }
+    }
+
+    // Simple double-tap detector for media button
+    private long lastTapTime = 0L;
+    private int lastKeyCode = -1;
+    private boolean isDoubleTap(KeyEvent ev) {
+        int code = ev.getKeyCode();
+        long now = System.currentTimeMillis();
+        boolean doubleTap = (code == lastKeyCode) && (now - lastTapTime < 450);
+        lastTapTime = now;
+        lastKeyCode = code;
+        return doubleTap;
     }
 
     // Copy assets with specified extensions to destination folder

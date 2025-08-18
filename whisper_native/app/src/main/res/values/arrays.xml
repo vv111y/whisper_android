@@ -8,4 +8,15 @@
         <item>cmd</item>
         <item>chat</item>
     </string-array>
+
+    <string-array name="tts_interrupt_entries">
+        <item>Flush always</item>
+        <item>Queue</item>
+        <item>Flush if speaking</item>
+    </string-array>
+    <string-array name="tts_interrupt_values">
+        <item>flush</item>
+        <item>queue</item>
+        <item>flush_state</item>
+    </string-array>
 </resources>
