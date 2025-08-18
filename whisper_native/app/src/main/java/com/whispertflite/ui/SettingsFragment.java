@@ -15,6 +15,13 @@ public class SettingsFragment extends PreferenceFragmentCompat {
     @Override
     public void onCreatePreferences(Bundle savedInstanceState, String rootKey) {
         setPreferencesFromResource(R.xml.preferences, rootKey);
+        // Listen mode (Wakeword vs Session)
+        Preference listenMode = findPreference("pref_listen_mode");
+        if (listenMode != null) {
+            // Do not attempt to talk to MainActivity directly here; it may be SettingsActivity.
+            // Persist and let MainActivity react via a SharedPreferences listener.
+            listenMode.setOnPreferenceChangeListener((p, newVal) -> true);
+        }
     // Mode selector + buttons
     Preference mode = findPreference("pref_config_mode");
     Preference btnReset = findPreference("pref_reset_defaults");

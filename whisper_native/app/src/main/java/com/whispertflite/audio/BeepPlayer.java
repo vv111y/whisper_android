@@ -70,6 +70,15 @@ public class BeepPlayer {
         }, 160);
     }
 
+    // Quick negative feedback earcon ("dud"): play the lower second beep only
+    public void playDud() {
+        if (nackTrack == null) return;
+        try { nackTrack.stop(); } catch (Exception ignore) {}
+        try { nackTrack.flush(); } catch (Exception ignore) {}
+        try { nackTrack.setPlaybackHeadPosition(0); } catch (Exception ignore) {}
+        try { nackTrack.play(); } catch (Exception ignore) {}
+    }
+
     public void release() {
         try { if (listenTrack != null) { listenTrack.release(); listenTrack = null; } } catch (Exception ignore) {}
         try { if (ackTrack != null) { ackTrack.release(); ackTrack = null; } } catch (Exception ignore) {}

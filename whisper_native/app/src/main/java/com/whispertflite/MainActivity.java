@@ -46,6 +46,8 @@ import com.google.android.material.navigation.NavigationView;
 import androidx.drawerlayout.widget.DrawerLayout;
 import androidx.appcompat.app.ActionBarDrawerToggle;
 import androidx.appcompat.widget.Toolbar;
+import android.view.Menu;
+import android.view.MenuItem;
 import androidx.fragment.app.Fragment;
 import androidx.fragment.app.FragmentTransaction;
 import com.whispertflite.ui.StartFragment;
@@ -102,12 +104,21 @@ public class MainActivity extends AppCompatActivity {
     private boolean toneFocusHeld = false;
     private BeepPlayer beepPlayer;
     private TTSManager ttsManager; // system TTS
+    // Deferred start if mic permission is requested mid-flow
+    private boolean pendingStartListen = false;
+    private String pendingListenMode = "session";
     private boolean mediaKeysObserved = false; // for conditional fallback
     private Runnable fallbackClaimTask; // schedule AudioTrack fallback if needed
     private Runnable inactivityReleaseTask; // release silent claim after idle
     private final long fallbackDelayMs = 1200; // wait for keys before fallback
     private final long inactivityTimeoutMs = 15_000; // stop fallback after idle
     private boolean normalizeBeforeTranscribe = true; // settings-driven
+    // Post‑TTS action handling: after speaking, play ready beep then run action
+    private enum PostTtsAction { NONE, START_RECORDING, START_SESSION_LISTENING }
+    private PostTtsAction postTtsAction = PostTtsAction.NONE;
+    // Router confirmation state
+    private enum PendingAction { NONE, START_CHAT, START_RECORD }
+    private PendingAction pendingAction = PendingAction.NONE;
 
     private File sdcardDataFolder = null;
     private File selectedWaveFile = null;
@@ -117,11 +128,36 @@ public class MainActivity extends AppCompatActivity {
     private final boolean loopTesting = false;
     private final SharedResource transcriptionSync = new SharedResource();
     private final Handler handler = new Handler(Looper.getMainLooper());
+    private final android.content.SharedPreferences.OnSharedPreferenceChangeListener prefsListener = (sp, key) -> {
+        if ("pref_listen_mode".equals(key)) {
+            // On mode change, go to IDLE and wait for explicit user action (app bar mic)
+            try {
+                handler.post(() -> {
+                    if (pipelineController != null) {
+                        // Pause listening and show IDLE in UI
+                        pipelineController.pauseListening();
+                    }
+                    // Stop frame emitter to save power until user restarts
+                    if (frameEmitter != null && frameEmitter.isRunning()) frameEmitter.stop();
+                    // Release media session focus
+                    updatePlaybackState(PlaybackState.STATE_PAUSED);
+                    try { if (mediaSession != null) mediaSession.setActive(false); } catch (Throwable ignore2) {}
+                    abandonAudioFocus();
+                    // Refresh app bar icon
+                    try { invalidateOptionsMenu(); } catch (Throwable ignore3) {}
+                });
+            } catch (Throwable ignore) {}
+        }
+    };
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
+    try {
+        androidx.preference.PreferenceManager.getDefaultSharedPreferences(this)
+            .registerOnSharedPreferenceChangeListener(prefsListener);
+    } catch (Throwable ignore) {}
 
         // Toolbar + Drawer
         Toolbar toolbar = findViewById(R.id.toolbar);
@@ -280,7 +316,7 @@ public class MainActivity extends AppCompatActivity {
             }
         });
 
-        // Audio playback functionality
+    // Audio playback functionality
         mPlayer = new Player(this);
         mPlayer.setListener(new Player.PlaybackListener() {
             @Override
@@ -295,6 +331,9 @@ public class MainActivity extends AppCompatActivity {
                 if (pipelineController != null) pipelineController.onOutputEnd();
             }
         });
+
+    // Ensure TTS is ready for spoken feedback and routing prompts
+    ensureTts();
 
     btnWakeListenStart = findViewById(R.id.btnWakeListenStart);
     btnWakeListenStop = findViewById(R.id.btnWakeListenStop);
@@ -354,6 +393,8 @@ public class MainActivity extends AppCompatActivity {
             @Override public void onStateChanged(PipelineController.State state) {
                 Log.d(TAG, "Pipeline state=" + state);
                 handler.post(() -> tvStatus.setText(state.toString()));
+                // Keep app bar icon in sync with state transitions
+                handler.post(() -> { try { invalidateOptionsMenu(); } catch (Throwable ignore) {} });
                 // Audio feedback on state transitions: LISTENING and IDLE
                 if (state == PipelineController.State.LISTENING) {
                     playStateTone(true);
@@ -605,20 +646,8 @@ public class MainActivity extends AppCompatActivity {
                 pipelineController.pauseListening();
                 handler.post(() -> btnSessionPauseResume.setText("Resume"));
                 updatePlaybackState(PlaybackState.STATE_PAUSED);
-
-                // Initialize TTS
-                ttsManager = new TTSManager(this, new TTSManager.Listener() {
-                    @Override public void onTtsStart(String utteranceId) {
-                        if (pipelineController != null) pipelineController.onOutputStart();
-                    }
-                    @Override public void onTtsDone(String utteranceId) {
-                        if (pipelineController != null) pipelineController.onOutputEnd();
-                    }
-                    @Override public void onTtsError(String utteranceId, String message) {
-                        if (pipelineController != null) pipelineController.onOutputEnd();
-                    }
-                });
-                applyTtsPrefs();
+                // Ensure TTS exists for any prompts
+                ensureTts();
             }
 
             // No onPlayPause in Callback; handled via onMediaButtonEvent above
@@ -626,11 +655,68 @@ public class MainActivity extends AppCompatActivity {
     // Prepare session; activation controlled by session start/stop
     updatePlaybackState(PlaybackState.STATE_PAUSED);
 
-        // Assume this Activity is the current activity, check record permission
-        checkRecordPermission();
+    // Proactively request mic permission once
+    checkRecordPermission();
 
         // for debugging
 //        testParallelProcessing();
+    }
+
+    @Override
+    public boolean onCreateOptionsMenu(Menu menu) {
+        getMenuInflater().inflate(R.menu.main_appbar, menu);
+        syncSessionMenuIcon(menu.findItem(R.id.action_session_toggle));
+        return true;
+    }
+
+    @Override
+    public boolean onOptionsItemSelected(@NonNull MenuItem item) {
+        if (item.getItemId() == R.id.action_session_toggle) {
+            handleSessionToggleFromAppBar();
+            syncSessionMenuIcon(item);
+            return true;
+        }
+        return super.onOptionsItemSelected(item);
+    }
+
+    private void handleSessionToggleFromAppBar() {
+        if (pipelineController == null) return;
+        PipelineController.State st = pipelineController.getState();
+        if (st == PipelineController.State.LISTENING) {
+            // Pause
+            pipelineController.pauseListening();
+            updatePlaybackState(PlaybackState.STATE_PAUSED);
+            if (btnSessionPauseResume != null) btnSessionPauseResume.setText("Resume");
+        } else if (st == PipelineController.State.IDLE) {
+            // Start according to selected listening mode
+            // Ensure audio frames are coming
+            if (!frameEmitter.isRunning()) frameEmitter.start();
+            applyListenModeAndStart();
+            if (btnSessionPauseResume != null) btnSessionPauseResume.setText("Pause");
+        } else if (st == PipelineController.State.CAPTURING || st == PipelineController.State.TRANSCRIBING) {
+            // Stop the session entirely
+            if (frameEmitter.isRunning()) frameEmitter.stop();
+            pipelineController.stopSession();
+            updatePlaybackState(PlaybackState.STATE_STOPPED);
+            mediaSession.setActive(false);
+            abandonAudioFocus();
+            try {
+                android.content.Intent svc = new android.content.Intent(this, SessionService.class);
+                stopService(svc);
+            } catch (Throwable ignore) {}
+        }
+    }
+
+    private void syncSessionMenuIcon(MenuItem item) {
+        if (item == null || pipelineController == null) return;
+        PipelineController.State st = pipelineController.getState();
+        if (st == PipelineController.State.IDLE) {
+            item.setIcon(R.drawable.ic_mic);
+        } else if (st == PipelineController.State.LISTENING) {
+            item.setIcon(R.drawable.ic_pause_listen);
+        } else {
+            item.setIcon(R.drawable.ic_stop_listen);
+        }
     }
 
     private void applyProfile(boolean chatMode) {
@@ -671,6 +757,40 @@ public class MainActivity extends AppCompatActivity {
 
     private void openSettings() {
         startActivity(new android.content.Intent(this, com.whispertflite.ui.SettingsActivity.class));
+    }
+
+    private void ensureTts() {
+        if (ttsManager != null) return;
+        try {
+            ttsManager = new TTSManager(MainActivity.this, new TTSManager.Listener() {
+                @Override public void onTtsStart(String utteranceId) {
+                    if (pipelineController != null) pipelineController.onOutputStart();
+                }
+                @Override public void onTtsDone(String utteranceId) {
+                    if (pipelineController != null) pipelineController.onOutputEnd();
+                    // If a post-TTS action is pending, play ready beep, then execute action
+                    if (postTtsAction != PostTtsAction.NONE) {
+                        PostTtsAction action = postTtsAction;
+                        postTtsAction = PostTtsAction.NONE;
+                        playStateTone(true);
+                        // Schedule action slightly after the beep finishes to avoid capturing it
+                        handler.postDelayed(() -> {
+                            try {
+                                if (action == PostTtsAction.START_RECORDING) {
+                                    if (mRecorder != null && !mRecorder.isInProgress()) startRecording();
+                                } else if (action == PostTtsAction.START_SESSION_LISTENING) {
+                                    applyListenModeAndStart();
+                                }
+                            } catch (Throwable ignore) {}
+                        }, 380);
+                    }
+                }
+                @Override public void onTtsError(String utteranceId, String message) {
+                    if (pipelineController != null) pipelineController.onOutputEnd();
+                }
+            });
+            applyTtsPrefs();
+        } catch (Throwable ignore) {}
     }
 
     // Called by Settings to immediately apply a new selected model
@@ -867,6 +987,10 @@ public class MainActivity extends AppCompatActivity {
         abandonAudioFocus();
     try { if (beepPlayer != null) { beepPlayer.release(); beepPlayer = null; } } catch (Exception ignore) {}
     try { if (ttsManager != null) { ttsManager.shutdown(); ttsManager = null; } } catch (Exception ignore) {}
+    try {
+        androidx.preference.PreferenceManager.getDefaultSharedPreferences(this)
+            .unregisterOnSharedPreferenceChangeListener(prefsListener);
+    } catch (Throwable ignore) {}
     }
 
     // Model initialization
@@ -910,6 +1034,10 @@ public class MainActivity extends AppCompatActivity {
 
                 Log.d(TAG, "Result: " + result);
                 handler.post(() -> {
+                    // Voice router: confirm commands and act after yes/no
+                    if (handleRouterFromTranscript(result)) {
+                        return; // handled by router (feedback already given)
+                    }
                     boolean session = (pipelineController != null && pipelineController.getMode() == PipelineController.Mode.SESSION);
                     String line = session ? ("• " + result + "\n") : (result + "\n");
                     tvResult.append(line);
@@ -957,6 +1085,11 @@ public class MainActivity extends AppCompatActivity {
         return adapter;
     }
 
+    private boolean hasRecordPermission() {
+        int permission = ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO);
+        return permission == PackageManager.PERMISSION_GRANTED;
+    }
+
     private void checkRecordPermission() {
         int permission = ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO);
         if (permission == PackageManager.PERMISSION_GRANTED) {
@@ -972,6 +1105,12 @@ public class MainActivity extends AppCompatActivity {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
         if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
             Log.d(TAG, "Record permission is granted");
+            if (pendingStartListen) {
+                pendingStartListen = false;
+                String mode = pendingListenMode;
+                if (!frameEmitter.isRunning()) frameEmitter.start();
+                if ("session".equals(mode)) startSessionListening(); else startWakeListening();
+            }
         } else {
             Log.d(TAG, "Record permission is not granted");
         }
@@ -999,6 +1138,114 @@ public class MainActivity extends AppCompatActivity {
 
     private void stopTranscription() {
         mWhisper.stop();
+    }
+
+    // --- Listening mode helpers (app bar + Settings) ---
+    private String currentListenModePref() {
+        try {
+            return androidx.preference.PreferenceManager.getDefaultSharedPreferences(this)
+                    .getString("pref_listen_mode", "session");
+        } catch (Throwable t) { return "wake"; }
+    }
+    private void startWakeListening() {
+        if (!frameEmitter.isRunning()) frameEmitter.start();
+        if (pipelineController != null) {
+            pipelineController.stopSession(); // ensure wake mode
+            pipelineController.startListening();
+            applyProfile(false); // use command-style defaults for wake
+        }
+        updatePlaybackState(PlaybackState.STATE_PAUSED);
+        mediaSession.setActive(false);
+        abandonAudioFocus();
+    }
+    private void startSessionListening() {
+        if (!frameEmitter.isRunning()) frameEmitter.start();
+        if (pipelineController != null) {
+            pipelineController.startSession();
+            applyProfile(false); // command defaults initially; user can switch to chat mode separately
+        }
+        if (chkCaptureMedia.isChecked()) {
+            if (requestAudioFocus()) mediaSession.setActive(true);
+            updatePlaybackState(PlaybackState.STATE_PLAYING);
+        } else {
+            updatePlaybackState(PlaybackState.STATE_PAUSED);
+            mediaSession.setActive(false);
+            abandonAudioFocus();
+        }
+    }
+    public void applyListenModeAndStart() {
+        String m = currentListenModePref();
+        // Ensure permission; if not, defer action until granted
+        if (!hasRecordPermission()) {
+            pendingStartListen = true;
+            pendingListenMode = m;
+            checkRecordPermission();
+            return;
+        }
+        if ("session".equals(m)) startSessionListening(); else startWakeListening();
+    }
+
+    // --- Router parsing and actions ---
+    private boolean handleRouterFromTranscript(String raw) {
+        if (raw == null) return false;
+        String text = normalizeText(raw);
+        if (pendingAction == PendingAction.NONE) {
+            if (text.equals("start new chat")) {
+                pendingAction = PendingAction.START_CHAT;
+                ttsConfirmStartNewChat();
+                return true;
+            } else if (text.equals("start new recording")) {
+                pendingAction = PendingAction.START_RECORD;
+                ttsConfirmStartNewRecording();
+                return true;
+            }
+            return false;
+        } else {
+            // Expect yes/no
+            if (text.equals("yes")) {
+                if (pendingAction == PendingAction.START_CHAT) {
+                    ttsAnnounceChatStarted();
+                    navigateToChat();
+                    // TODO: execute app command to start a fresh chat session
+                } else if (pendingAction == PendingAction.START_RECORD) {
+                    ttsAnnounceRecordingStarting();
+                    navigateToRecorder();
+                    // TODO: execute app command to start a new recording after beep
+                }
+                pendingAction = PendingAction.NONE;
+                return true;
+            } else if (text.equals("no")) {
+                // Cancel softly with a dud earcon
+                earconDud();
+                pendingAction = PendingAction.NONE;
+                return true;
+            } else {
+                // Not understood: dud earcon only (quick feedback)
+                earconDud();
+                return true;
+            }
+        }
+    }
+    private String normalizeText(String s) {
+        String t = s.toLowerCase();
+        t = t.replaceAll("[^a-z0-9 ]", " ");
+        t = t.replaceAll("\\s+", " ").trim();
+        return t;
+    }
+
+    private void navigateToChat() {
+        try {
+            showFragment(new com.whispertflite.ui.ChatFragment());
+            findViewById(R.id.recorder_container).setVisibility(View.GONE);
+            findViewById(R.id.fragment_container).setVisibility(View.VISIBLE);
+        } catch (Throwable ignore) {}
+    }
+    private void navigateToRecorder() {
+        try {
+            clearFragment();
+            findViewById(R.id.fragment_container).setVisibility(View.GONE);
+            findViewById(R.id.recorder_container).setVisibility(View.VISIBLE);
+        } catch (Throwable ignore) {}
     }
 
     private void applyTtsPrefs() {
@@ -1211,6 +1458,38 @@ public class MainActivity extends AppCompatActivity {
                 }, releaseMs);
             }
         }
+    }
+
+    // --- TTS feedback helpers ---
+    private void ttsConfirmStartNewChat() {
+        if (ttsManager == null) return;
+        ttsManager.speak("start new chat?");
+    }
+    private void ttsConfirmStartNewRecording() {
+        if (ttsManager == null) return;
+        ttsManager.speak("start new recording?");
+    }
+    private void ttsAnnounceChatStarted() {
+        if (ttsManager == null) return;
+    ttsManager.speak("new chat started, go ahead");
+    // After this utterance completes, play ready beep and start listening
+    postTtsAction = PostTtsAction.START_SESSION_LISTENING;
+    }
+    private void ttsAnnounceRecordingStarting() {
+        if (ttsManager == null) return;
+        ttsManager.speak("new recording starting, begin speaking after beep");
+    // After this utterance completes, play ready beep and start recording
+    postTtsAction = PostTtsAction.START_RECORDING;
+    }
+    private void earconDud() {
+        if (pipelineController != null) pipelineController.gateInput(true);
+        requestToneFocusIfNeeded();
+        if (beepPlayer == null) beepPlayer = new BeepPlayer();
+        try { beepPlayer.playDud(); } catch (Exception ignore) {}
+        handler.postDelayed(() -> {
+            if (pipelineController != null) pipelineController.gateInput(false);
+            abandonToneFocus();
+        }, 220);
     }
 
     static class SharedResource {

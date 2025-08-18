@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:paddingStart="16dp"
+    android:paddingEnd="16dp"
+    android:paddingTop="8dp"
+    android:paddingBottom="8dp">
+
+    <com.google.android.material.chip.ChipGroup
+        android:id="@+id/listen_chip_group"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="start"
+        app:singleSelection="true"
+        app:selectionRequired="true">
+
+        <com.google.android.material.chip.Chip
+            android:id="@+id/chip_wake"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Wakeword"
+            android:checkable="true" />
+
+        <com.google.android.material.chip.Chip
+            android:id="@+id/chip_session"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Session"
+            android:checkable="true" />
+
+    </com.google.android.material.chip.ChipGroup>
+
+</FrameLayout>

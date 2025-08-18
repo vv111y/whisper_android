@@ -68,6 +68,10 @@ public class PipelineController {
             if (state == State.LISTENING) {
                 listeningArmedAtUptimeMs = android.os.SystemClock.uptimeMillis();
                 listeningSilenceFrames = 0;
+                // Clear pre-roll and pending capture state when re-entering LISTENING
+                preRoll.clear();
+                captureFrames.clear();
+                capturingSpeechActive = false;
             }
             if (listener != null) listener.onStateChanged(state);
         }

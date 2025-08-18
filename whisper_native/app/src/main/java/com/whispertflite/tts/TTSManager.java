@@ -145,7 +145,7 @@ public class TTSManager {
                 tts.speak(text, queueMode, params, id);
             } else {
                 // Deprecated API support
-                Map<String, String> params = new HashMap<>();
+                HashMap<String, String> params = new HashMap<>();
                 params.put(TextToSpeech.Engine.KEY_PARAM_STREAM, String.valueOf(android.media.AudioManager.STREAM_MUSIC));
                 tts.speak(text, queueMode, params);
             }
