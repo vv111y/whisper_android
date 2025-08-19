@@ -175,15 +175,7 @@ public class MainActivity extends AppCompatActivity {
                 try { if (mediaSession != null) mediaSession.setActive(false); } catch (Throwable ignore) {}
                 abandonAudioFocus();
                 try { invalidateOptionsMenu(); } catch (Throwable ignore) {}
-                if (releaseVad && vadEnergy != null) {
-                    try {
-                        if (vadEnergy instanceof com.whispertflite.frontend.VadWebRtcNative)
-                            ((com.whispertflite.frontend.VadWebRtcNative) vadEnergy).release();
-                        if (vadEnergy instanceof com.whispertflite.frontend.VadSilero)
-                            ((com.whispertflite.frontend.VadSilero) vadEnergy).release();
-                    } catch (Throwable ignore) {}
-                    vadEnergy = null;
-                }
+                if (releaseVad) releaseCurrentVad();
             });
         } catch (Throwable ignore) {}
     }
@@ -192,13 +184,8 @@ public class MainActivity extends AppCompatActivity {
         try {
             android.content.SharedPreferences prefs = androidx.preference.PreferenceManager.getDefaultSharedPreferences(this);
             VadConfig cfg = VadConfig.fromPreferences(prefs);
-            if (vadEnergy == null || !matchesPrefs(vadEnergy, prefs)) {
-                try {
-                    if (vadEnergy instanceof com.whispertflite.frontend.VadWebRtcNative)
-                        ((com.whispertflite.frontend.VadWebRtcNative) vadEnergy).release();
-                    if (vadEnergy instanceof com.whispertflite.frontend.VadSilero)
-                        ((com.whispertflite.frontend.VadSilero) vadEnergy).release();
-                } catch (Throwable ignore) {}
+            if (vadEnergy == null || !matchesPrefs(vadEnergy, cfg)) {
+                releaseCurrentVad();
 
                 vadEnergy = VadFactory.create(this, cfg, new com.whispertflite.frontend.BasicVad.Listener() {
                     @Override public void onSpeechStart() {
@@ -224,15 +211,24 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    private boolean matchesPrefs(com.whispertflite.frontend.BasicVad vad, android.content.SharedPreferences prefs) {
-        String engine = prefs.getString("pref_vad_engine", "energy");
-        if ("silero".equals(engine)) return vad instanceof com.whispertflite.frontend.VadSilero;
-        if ("webrtc".equals(engine)) {
-            String impl = prefs.getString("pref_vad_webrtc_impl", "simple");
-            if ("native".equals(impl)) return vad instanceof com.whispertflite.frontend.VadWebRtcNative;
+    private boolean matchesPrefs(com.whispertflite.frontend.BasicVad vad, VadConfig cfg) {
+        if ("silero".equals(cfg.engine)) return vad instanceof com.whispertflite.frontend.VadSilero;
+        if ("webrtc".equals(cfg.engine)) {
+            if ("native".equals(cfg.webrtcImpl)) return vad instanceof com.whispertflite.frontend.VadWebRtcNative;
             return vad instanceof com.whispertflite.frontend.VadWebRtcSimple;
         }
         return vad instanceof com.whispertflite.frontend.VadEnergy;
+    }
+
+    private void releaseCurrentVad() {
+        if (vadEnergy == null) return;
+        try {
+            if (vadEnergy instanceof com.whispertflite.frontend.VadWebRtcNative)
+                ((com.whispertflite.frontend.VadWebRtcNative) vadEnergy).release();
+            if (vadEnergy instanceof com.whispertflite.frontend.VadSilero)
+                ((com.whispertflite.frontend.VadSilero) vadEnergy).release();
+        } catch (Throwable ignore) {}
+        vadEnergy = null;
     }
 
     private BasicVad buildEnergyVad() {
