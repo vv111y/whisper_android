@@ -105,6 +105,7 @@ public class MainActivity extends AppCompatActivity {
     private AudioFocusRequest toneFocusRequest; // transient focus for tones
     private boolean toneFocusHeld = false;
     private BeepPlayer beepPlayer;
+    private boolean suppressNextListenTone = false;
     private TTSManager ttsManager; // system TTS
     // Deferred start if mic permission is requested mid-flow
     private boolean pendingStartListen = false;
@@ -538,7 +539,11 @@ public class MainActivity extends AppCompatActivity {
                 handler.post(() -> { try { invalidateOptionsMenu(); } catch (Throwable ignore) {} });
                 // Audio feedback on state transitions: LISTENING and IDLE
                 if (state == PipelineController.State.LISTENING) {
-                    playStateTone(true);
+                    if (suppressNextListenTone) {
+                        suppressNextListenTone = false;
+                    } else {
+                        playStateTone(true);
+                    }
                 } else if (state == PipelineController.State.IDLE) {
                     playStateTone(false);
                 }
@@ -584,6 +589,9 @@ public class MainActivity extends AppCompatActivity {
             if (!frameEmitter.isRunning()) frameEmitter.start();
             pipelineController.startListening();
             applyProfile(false); // command-style listen (no chat capture)
+            // Play ready earcon explicitly and suppress state-driven duplicate
+            suppressNextListenTone = true;
+            playStateTone(true);
         });
         btnWakeListenStop.setOnClickListener(v -> {
             if (frameEmitter.isRunning()) frameEmitter.stop();
@@ -596,6 +604,20 @@ public class MainActivity extends AppCompatActivity {
             if (!frameEmitter.isRunning()) frameEmitter.start();
             pipelineController.startSession();
             applyProfile(false); // command defaults by default
+            // Play ready earcon explicitly and suppress state-driven duplicate
+            suppressNextListenTone = true;
+            playStateTone(true);
+            // If using WebRTC native, relax required pre-speech silence slightly
+            try {
+                android.content.SharedPreferences sp = androidx.preference.PreferenceManager.getDefaultSharedPreferences(this);
+                String eng = sp.getString("pref_vad_engine", "energy");
+                String impl = sp.getString("pref_vad_webrtc_impl", "simple");
+                if ("webrtc".equals(eng) && "native".equals(impl)) {
+                    pipelineController.setRequiredSilenceFramesBeforeCapture(3);
+                } else {
+                    pipelineController.setRequiredSilenceFramesBeforeCapture(6);
+                }
+            } catch (Throwable ignore) {}
             mediaKeysObserved = false;
             // Activate MediaSession + focus only if capture toggle ON
             if (chkCaptureMedia.isChecked()) {

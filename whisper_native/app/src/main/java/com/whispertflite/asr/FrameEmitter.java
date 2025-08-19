@@ -33,6 +33,7 @@ public class FrameEmitter {
     private final AtomicBoolean running = new AtomicBoolean(false);
     private Thread worker;
     private Listener listener;
+    private volatile int warmupFramesToDrop = 0;
 
     public FrameEmitter(Context context) {
         this.context = context.getApplicationContext();
@@ -48,6 +49,8 @@ public class FrameEmitter {
 
     public void start() {
         if (running.compareAndSet(false, true)) {
+            // Drop a few frames on start to avoid pops feeding VAD
+            warmupFramesToDrop = 3; // ~60ms
             worker = new Thread(this::captureLoop, "FrameEmitterThread");
             worker.start();
         } else {
@@ -105,7 +108,11 @@ public class FrameEmitter {
                 for (int i = 0; i < FRAME_SAMPLES; i++) {
                     floatFrame[i] = shortBuf[i] / 32768f;
                 }
-                if (listener != null) listener.onFrame(floatFrame.clone()); // clone to avoid mutation
+                if (warmupFramesToDrop > 0) {
+                    warmupFramesToDrop--;
+                } else if (listener != null) {
+                    listener.onFrame(floatFrame.clone()); // clone to avoid mutation
+                }
             }
         } finally {
             try { recorder.stop(); } catch (Exception ignored) {}
