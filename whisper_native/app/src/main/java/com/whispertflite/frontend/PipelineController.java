@@ -60,6 +60,18 @@ public class PipelineController {
     private long lastVadSpeechStartMs = 0L;
     private long lastVadSpeechEndMs = 0L;
 
+    // Diagnostics counters
+    private long diagBlockedArming = 0L;
+    private long diagBlockedCooldown = 0L;
+    private long diagBlockedSilence = 0L;
+    private long diagCaptureStarted = 0L;
+    private long diagAbortNoFrames = 0L;
+    private long diagFinalizeSilenceExceeded = 0L;
+    private long diagFinalizeMaxDuration = 0L;
+    private long diagDiscardTooShort = 0L;
+    private long diagDiscardLowRms = 0L;
+    private long diagUtterancesEmitted = 0L;
+
     public PipelineController(int frameSamples, Listener listener) {
         this.frameSamples = frameSamples;
         this.listener = listener;
@@ -152,15 +164,18 @@ public class PipelineController {
             preRoll.addLast(copy);
             while (preRoll.size() > preRollFrames) preRoll.pollFirst();
             // Frame-driven start: only on rising edge from non-speech -> speech while LISTENING
-            if (mode == Mode.SESSION && speech && !prevListeningSpeech) {
+        if (mode == Mode.SESSION && speech && !prevListeningSpeech) {
                 long now = SystemClock.uptimeMillis();
                 // Respect arming delay
                 if (now - listeningArmedAtUptimeMs < minArmDelayMs) {
                     Log.d(TAG, "Blocked start: arming delay not met");
+            diagBlockedArming++;
                 } else if (now - lastCaptureEndUptimeMs < interUtteranceCooldownMs) {
                     Log.d(TAG, "Blocked start: inter-utterance cooldown");
+            diagBlockedCooldown++;
                 } else if (listeningSilenceFrames < requiredSilenceFramesBeforeCapture) {
                     Log.d(TAG, "Blocked start: insufficient pre-speech silence (have=" + listeningSilenceFrames + ", need=" + requiredSilenceFramesBeforeCapture + ")");
+            diagBlockedSilence++;
                 } else {
                     // Start capture
                     captureFrames.clear();
@@ -173,6 +188,7 @@ public class PipelineController {
                     setState(State.CAPTURING);
                     Log.d(TAG, "Capture started (preRollFrames=" + preRoll.size() + ")");
                     captureStartUptimeMs = now;
+            diagCaptureStarted++;
                 }
             }
             // Track silence frames while listening (before speech onset)
@@ -192,10 +208,12 @@ public class PipelineController {
                 capturingSpeechActive = false;
                 lastCaptureEndUptimeMs = now;
                 setState(State.LISTENING);
+                diagAbortNoFrames++;
                 return;
             }
             if (capturingSpeechActive && (now - captureStartUptimeMs) > maxCaptureMs) {
                 // Force finalize to keep UX responsive
+                diagFinalizeMaxDuration++;
                 finalizeCapture();
                 return;
             }
@@ -216,6 +234,7 @@ public class PipelineController {
                     captureFrames.add(copy);
                 } else {
                     // Silence exceeded merge window: finalize here proactively
+                    diagFinalizeSilenceExceeded++;
                     finalizeCapture();
                     return;
                 }
@@ -255,6 +274,7 @@ public class PipelineController {
             capturingSpeechActive = false;
             lastCaptureEndUptimeMs = SystemClock.uptimeMillis();
             setState(State.LISTENING);
+            diagDiscardTooShort++;
             return;
         }
         // Additional guard: if RMS of the utterance is extremely low, discard as noise
@@ -269,10 +289,12 @@ public class PipelineController {
             capturingSpeechActive = false;
             lastCaptureEndUptimeMs = SystemClock.uptimeMillis();
             setState(State.LISTENING);
+            diagDiscardLowRms++;
             return;
         }
         float[] pcm = flatten();
         setState(State.TRANSCRIBING);
+        diagUtterancesEmitted++;
         if (listener != null) listener.onUtteranceReady(pcm);
     }
 
@@ -287,4 +309,22 @@ public class PipelineController {
     public void setMaxCaptureMs(long ms) { this.maxCaptureMs = Math.max(1000L, ms); }
     public void setMinUtteranceFrames(int frames) { this.minUtteranceFrames = Math.max(1, frames); }
     public void setRequiredSilenceFramesBeforeCapture(int frames) { this.requiredSilenceFramesBeforeCapture = Math.max(0, frames); }
+
+    // Diagnostics accessors
+    public void resetDiagnostics() {
+        diagBlockedArming = diagBlockedCooldown = diagBlockedSilence = 0L;
+        diagCaptureStarted = diagAbortNoFrames = diagFinalizeSilenceExceeded = 0L;
+        diagFinalizeMaxDuration = diagDiscardTooShort = diagDiscardLowRms = 0L;
+        diagUtterancesEmitted = 0L;
+    }
+    public long getDiagBlockedArming() { return diagBlockedArming; }
+    public long getDiagBlockedCooldown() { return diagBlockedCooldown; }
+    public long getDiagBlockedSilence() { return diagBlockedSilence; }
+    public long getDiagCaptureStarted() { return diagCaptureStarted; }
+    public long getDiagAbortNoFrames() { return diagAbortNoFrames; }
+    public long getDiagFinalizeSilenceExceeded() { return diagFinalizeSilenceExceeded; }
+    public long getDiagFinalizeMaxDuration() { return diagFinalizeMaxDuration; }
+    public long getDiagDiscardTooShort() { return diagDiscardTooShort; }
+    public long getDiagDiscardLowRms() { return diagDiscardLowRms; }
+    public long getDiagUtterancesEmitted() { return diagUtterancesEmitted; }
 }
