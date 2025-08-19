@@ -54,6 +54,8 @@ public class PipelineController {
     private int minUtteranceFrames = 22; // ~440ms, reduce false-on short noises
     // Safety: if CAPTURING but no frames are received, abort after a short timeout
     private long captureNoFramesAbortMs = 1200L; // 1.2s grace
+    // Track last frame speech state while LISTENING to detect rising edges only
+    private boolean prevListeningSpeech = false;
 
     public PipelineController(int frameSamples, Listener listener) {
         this.frameSamples = frameSamples;
@@ -180,12 +182,17 @@ public class PipelineController {
             System.arraycopy(frame, 0, copy, 0, frame.length);
             preRoll.addLast(copy);
             while (preRoll.size() > preRollFrames) preRoll.pollFirst();
+            // Frame-driven start: only on rising edge from non-speech -> speech while LISTENING
+            if (mode == Mode.SESSION && speech && !prevListeningSpeech) {
+                onSpeechStart(0);
+            }
             // Track silence frames while listening (before speech onset)
             if (speech) {
                 listeningSilenceFrames = 0;
             } else {
                 if (listeningSilenceFrames < 1000) listeningSilenceFrames++; // cap to avoid overflow
             }
+            prevListeningSpeech = speech;
         }
         if (state == State.CAPTURING) {
             long now = SystemClock.uptimeMillis();
