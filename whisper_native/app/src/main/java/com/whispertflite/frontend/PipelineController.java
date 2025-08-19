@@ -77,10 +77,21 @@ public class PipelineController {
     private long diagDiscardLowRms = 0L;
     private long diagUtterancesEmitted = 0L;
 
+    private static boolean detectDebug() {
+        try {
+            Class<?> c = Class.forName("com.whispertflite.BuildConfig");
+            java.lang.reflect.Field f = c.getField("DEBUG");
+            return f.getBoolean(null);
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
     public PipelineController(int frameSamples, Listener listener) {
         this.frameSamples = frameSamples;
         this.listener = listener;
         this.clock = new SystemClockImpl();
+        this.loggingEnabled = detectDebug();
     }
 
     // Visible for tests
@@ -88,6 +99,7 @@ public class PipelineController {
         this.frameSamples = frameSamples;
         this.listener = listener;
         this.clock = (clock == null) ? new SystemClockImpl() : clock;
+        this.loggingEnabled = detectDebug();
     }
 
     public State getState() { return state; }
