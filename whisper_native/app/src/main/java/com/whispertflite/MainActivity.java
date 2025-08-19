@@ -43,10 +43,12 @@ import com.whispertflite.frontend.VadEnergy;
 import com.whispertflite.frontend.VadSilero;
 import com.whispertflite.frontend.WakewordDetector;
 import com.whispertflite.frontend.VadFactory;
+import com.whispertflite.frontend.VadConfig;
 import com.whispertflite.audio.BeepPlayer;
-import com.whispertflite.engine.WhisperEngineNative;
-import com.google.android.material.navigation.NavigationView;
+import com.whispertflite.tts.TTSManager;
+
 import androidx.drawerlayout.widget.DrawerLayout;
+import com.google.android.material.navigation.NavigationView;
 import androidx.appcompat.app.ActionBarDrawerToggle;
 import androidx.appcompat.widget.Toolbar;
 import android.view.Menu;
@@ -55,7 +57,6 @@ import androidx.fragment.app.Fragment;
 import androidx.fragment.app.FragmentTransaction;
 import com.whispertflite.ui.StartFragment;
 import com.whispertflite.ui.ChatFragment;
-import com.whispertflite.tts.TTSManager;
 
 import java.io.File;
 import java.io.FileOutputStream;
@@ -134,83 +135,64 @@ public class MainActivity extends AppCompatActivity {
     private final SharedResource transcriptionSync = new SharedResource();
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final android.content.SharedPreferences.OnSharedPreferenceChangeListener prefsListener = (sp, key) -> {
-    if ("pref_listen_mode".equals(key)) {
-            // On mode change, go to IDLE and wait for explicit user action (app bar mic)
+        if ("pref_listen_mode".equals(key)) {
             try {
                 handler.post(() -> {
-                    if (pipelineController != null) {
-                        // Pause listening and show IDLE in UI
-                        pipelineController.pauseListening();
-                    }
-                    // Stop frame emitter to save power until user restarts
+                    if (pipelineController != null) pipelineController.pauseListening();
                     if (frameEmitter != null && frameEmitter.isRunning()) frameEmitter.stop();
-                    // Release media session focus
                     updatePlaybackState(PlaybackState.STATE_PAUSED);
-                    try { if (mediaSession != null) mediaSession.setActive(false); } catch (Throwable ignore2) {}
+                    try { if (mediaSession != null) mediaSession.setActive(false); } catch (Throwable ignore) {}
                     abandonAudioFocus();
-                    // Refresh app bar icon
-                    try { invalidateOptionsMenu(); } catch (Throwable ignore3) {}
+                    try { invalidateOptionsMenu(); } catch (Throwable ignore) {}
                 });
             } catch (Throwable ignore) {}
         }
         if ("pref_vad_engine".equals(key)) {
-            // On engine change, pause/idle to avoid live swaps; rebuild on next start
-            try {
-                handler.post(() -> {
-                    if (pipelineController != null) pipelineController.pauseListening();
-                    if (frameEmitter != null && frameEmitter.isRunning()) frameEmitter.stop();
-                    updatePlaybackState(PlaybackState.STATE_PAUSED);
-                    try { if (mediaSession != null) mediaSession.setActive(false); } catch (Throwable ignore2) {}
-                    abandonAudioFocus();
-                    try { invalidateOptionsMenu(); } catch (Throwable ignore3) {}
-                    // Release resources from current VAD instance
-                    if (vadEnergy instanceof com.whispertflite.frontend.VadWebRtcNative) {
-                        ((com.whispertflite.frontend.VadWebRtcNative) vadEnergy).release();
-                    } else if (vadEnergy instanceof com.whispertflite.frontend.VadSilero) {
-                        ((com.whispertflite.frontend.VadSilero) vadEnergy).release();
-                    }
-                    vadEnergy = null;
-                });
-            } catch (Throwable ignore) {}
+            requestVadRebuildOnNextStart(true);
         }
         if ("pref_vad_webrtc_impl".equals(key)) {
-            // Switching between Simple vs Native requires VAD rebuild; do the same safe pause.
-            try {
-                handler.post(() -> {
-                    if (pipelineController != null) pipelineController.pauseListening();
-                    if (frameEmitter != null && frameEmitter.isRunning()) frameEmitter.stop();
-                    updatePlaybackState(PlaybackState.STATE_PAUSED);
-                    try { if (mediaSession != null) mediaSession.setActive(false); } catch (Throwable ignore2) {}
-                    abandonAudioFocus();
-                    try { invalidateOptionsMenu(); } catch (Throwable ignore3) {}
-                    // Release WebRTC native resources if applicable
-                    if (vadEnergy instanceof com.whispertflite.frontend.VadWebRtcNative) {
-                        ((com.whispertflite.frontend.VadWebRtcNative) vadEnergy).release();
-                    }
-                    vadEnergy = null;
-                });
-            } catch (Throwable ignore) {}
+            requestVadRebuildOnNextStart(true);
         }
-    if ("pref_vad_webrtc_mode".equals(key)) {
+        if ("pref_vad_webrtc_mode".equals(key)) {
             try {
                 String engine = androidx.preference.PreferenceManager.getDefaultSharedPreferences(this).getString("pref_vad_engine", "energy");
                 String impl = androidx.preference.PreferenceManager.getDefaultSharedPreferences(this).getString("pref_vad_webrtc_impl", "simple");
-        if ("webrtc".equals(engine) && "native".equals(impl) && vadEnergy instanceof com.whispertflite.frontend.VadWebRtcNative) {
-            String modeStr = androidx.preference.PreferenceManager.getDefaultSharedPreferences(this).getString("pref_vad_webrtc_mode", "2");
-            int mode = 2;
-            try { mode = Integer.parseInt(modeStr); } catch (Throwable ignore) {}
+                if ("webrtc".equals(engine) && "native".equals(impl) && vadEnergy instanceof com.whispertflite.frontend.VadWebRtcNative) {
+                    String modeStr = androidx.preference.PreferenceManager.getDefaultSharedPreferences(this).getString("pref_vad_webrtc_mode", "2");
+                    int mode = 2; try { mode = Integer.parseInt(modeStr); } catch (Throwable ignore) {}
                     ((com.whispertflite.frontend.VadWebRtcNative) vadEnergy).setAggressiveness(mode);
                 }
             } catch (Throwable ignore) {}
         }
     };
 
+    private void requestVadRebuildOnNextStart(boolean releaseVad) {
+        try {
+            handler.post(() -> {
+                if (pipelineController != null) pipelineController.pauseListening();
+                if (frameEmitter != null && frameEmitter.isRunning()) frameEmitter.stop();
+                updatePlaybackState(PlaybackState.STATE_PAUSED);
+                try { if (mediaSession != null) mediaSession.setActive(false); } catch (Throwable ignore) {}
+                abandonAudioFocus();
+                try { invalidateOptionsMenu(); } catch (Throwable ignore) {}
+                if (releaseVad && vadEnergy != null) {
+                    try {
+                        if (vadEnergy instanceof com.whispertflite.frontend.VadWebRtcNative)
+                            ((com.whispertflite.frontend.VadWebRtcNative) vadEnergy).release();
+                        if (vadEnergy instanceof com.whispertflite.frontend.VadSilero)
+                            ((com.whispertflite.frontend.VadSilero) vadEnergy).release();
+                    } catch (Throwable ignore) {}
+                    vadEnergy = null;
+                }
+            });
+        } catch (Throwable ignore) {}
+    }
+
     private void ensureVadEngineInitialized() {
         try {
             android.content.SharedPreferences prefs = androidx.preference.PreferenceManager.getDefaultSharedPreferences(this);
-            // Reuse existing instance if compatible; otherwise create fresh via factory
+            VadConfig cfg = VadConfig.fromPreferences(prefs);
             if (vadEnergy == null || !matchesPrefs(vadEnergy, prefs)) {
-                // Release previous resources safely
                 try {
                     if (vadEnergy instanceof com.whispertflite.frontend.VadWebRtcNative)
                         ((com.whispertflite.frontend.VadWebRtcNative) vadEnergy).release();
@@ -218,14 +200,14 @@ public class MainActivity extends AppCompatActivity {
                         ((com.whispertflite.frontend.VadSilero) vadEnergy).release();
                 } catch (Throwable ignore) {}
 
-                vadEnergy = VadFactory.create(this, prefs, new com.whispertflite.frontend.BasicVad.Listener() {
+                vadEnergy = VadFactory.create(this, cfg, new com.whispertflite.frontend.BasicVad.Listener() {
                     @Override public void onSpeechStart() {
-                        Log.d(TAG, "VAD speech start (" + prefs.getString("pref_vad_engine", "energy") + ")");
+                        Log.d(TAG, "VAD speech start (" + cfg.engine + ")");
                         if (finalizeRunnable != null) handler.removeCallbacks(finalizeRunnable);
                         pipelineController.onSpeechStart(0);
                     }
                     @Override public void onSpeechEnd() {
-                        Log.d(TAG, "VAD speech end (" + prefs.getString("pref_vad_engine", "energy") + ")");
+                        Log.d(TAG, "VAD speech end (" + cfg.engine + ")");
                         if (finalizeRunnable != null) handler.removeCallbacks(finalizeRunnable);
                         finalizeRunnable = () -> pipelineController.onSpeechEnd();
                         handler.postDelayed(finalizeRunnable, finalizeDelayMs);

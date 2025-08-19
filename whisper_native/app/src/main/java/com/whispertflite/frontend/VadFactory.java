@@ -15,32 +15,35 @@ public final class VadFactory {
     public static BasicVad create(Context ctx,
                                   SharedPreferences prefs,
                                   BasicVad.Listener listener) {
-        String engine = prefs.getString("pref_vad_engine", "energy");
-        int hang = prefs.getInt("pref_vad_hangover", 30);
-        int atk = prefs.getInt("pref_vad_attack", 3);
+        VadConfig cfg = VadConfig.fromPreferences(prefs);
+        return create(ctx, cfg, listener);
+    }
+
+    public static BasicVad create(Context ctx,
+                                  VadConfig cfg,
+                                  BasicVad.Listener listener) {
+        String engine = cfg.engine;
+        int hang = cfg.hangoverFrames;
+        int atk = cfg.attackFrames;
 
         if ("silero".equals(engine)) {
             VadSilero v = new VadSilero(ctx, listener);
-            int thrProg = prefs.getInt("pref_vad_threshold", 35);
-            float thr = 0.1f + (thrProg / 100f) * (0.9f - 0.1f);
+            float thr = cfg.sileroThreshold;
             try {
                 v.setThreshold(thr);
-                v.setHangoverFrames(Math.max(0, prefs.getInt("pref_vad_hangover", 15)));
-                v.setStartAttackFrames(Math.max(1, prefs.getInt("pref_vad_attack", 2)));
+                v.setHangoverFrames(Math.max(0, hang));
+                v.setStartAttackFrames(Math.max(1, atk));
             } catch (Throwable ignore) {}
             return v;
         }
 
         // Map common RMS threshold
-        int thrProg = prefs.getInt("pref_vad_threshold", 35);
-        float thr = 0.005f + (thrProg / 100f) * (0.1f - 0.005f);
+        float thr = cfg.rmsThreshold;
 
         if ("webrtc".equals(engine)) {
-            String impl = prefs.getString("pref_vad_webrtc_impl", "simple");
+            String impl = cfg.webrtcImpl;
             if ("native".equals(impl)) {
-                String modeStr = prefs.getString("pref_vad_webrtc_mode", "2");
-                int mode = 2; try { mode = Integer.parseInt(modeStr); } catch (Throwable ignore) {}
-                VadWebRtcNative v = new VadWebRtcNative(mode, listener);
+                VadWebRtcNative v = new VadWebRtcNative(cfg.webrtcMode, listener);
                 try {
                     v.setThreshold(thr);
                     v.setHangoverFrames(hang);
