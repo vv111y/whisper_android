@@ -41,7 +41,7 @@ class EdgeDetector {
             streak = 0;
             if (inSpeech) {
                 hang++;
-                if (hang > hangoverFrames) {
+                if (hang >= hangoverFrames) {
                     inSpeech = false;
                     hang = 0;
                     end = true;

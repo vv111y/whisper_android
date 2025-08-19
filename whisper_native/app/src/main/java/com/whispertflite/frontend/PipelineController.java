@@ -1,6 +1,5 @@
 package com.whispertflite.frontend;
 
-import android.os.SystemClock;
 import android.util.Log;
 
 import java.util.ArrayList;
@@ -28,6 +27,12 @@ public class PipelineController {
 
     private final List<float[]> captureFrames = new ArrayList<>();
     private boolean capturingSpeechActive = false; // tracks if any speech seen in current capture
+
+    // Clock abstraction for testability
+    interface Clock { long now(); }
+    static class SystemClockImpl implements Clock { public long now() { return android.os.SystemClock.uptimeMillis(); } }
+    private final Clock clock;
+    private boolean loggingEnabled = true;
 
     // Pre-roll buffer: keep last N frames while LISTENING to include leading phonemes
     private final ArrayDeque<float[]> preRoll = new ArrayDeque<>();
@@ -75,6 +80,14 @@ public class PipelineController {
     public PipelineController(int frameSamples, Listener listener) {
         this.frameSamples = frameSamples;
         this.listener = listener;
+        this.clock = new SystemClockImpl();
+    }
+
+    // Visible for tests
+    PipelineController(int frameSamples, Listener listener, Clock clock) {
+        this.frameSamples = frameSamples;
+        this.listener = listener;
+        this.clock = (clock == null) ? new SystemClockImpl() : clock;
     }
 
     public State getState() { return state; }
@@ -87,7 +100,7 @@ public class PipelineController {
         if (s != state) {
             state = s;
             if (state == State.LISTENING) {
-                listeningArmedAtUptimeMs = android.os.SystemClock.uptimeMillis();
+                listeningArmedAtUptimeMs = clock.now();
                 listeningSilenceFrames = 0;
                 // Clear pre-roll and pending capture state when re-entering LISTENING
                 preRoll.clear();
@@ -98,9 +111,12 @@ public class PipelineController {
         }
     }
 
+    // Allow disabling Android Log calls during local unit tests
+    public void setLoggingEnabled(boolean enabled) { this.loggingEnabled = enabled; }
+
     public void startListening() {
         setState(State.LISTENING);
-        listeningArmedAtUptimeMs = android.os.SystemClock.uptimeMillis();
+    listeningArmedAtUptimeMs = clock.now();
     }
     public void stop() { setState(State.IDLE); captureFrames.clear(); }
 
@@ -136,14 +152,14 @@ public class PipelineController {
     public void resumeListening() {
         inputGated = false;
         setState(State.LISTENING);
-        listeningArmedAtUptimeMs = android.os.SystemClock.uptimeMillis();
+    listeningArmedAtUptimeMs = clock.now();
     listeningSilenceFrames = 0;
     }
 
     // Handle VAD speech start: in SESSION mode, begin capturing immediately (no wakeword)
-    public void onSpeechStart() { lastVadSpeechStartMs = SystemClock.uptimeMillis(); }
+    public void onSpeechStart() { lastVadSpeechStartMs = clock.now(); }
     // VAD hint only (no state transition)
-    public void onSpeechStart(int customSilenceRequirement) { lastVadSpeechStartMs = SystemClock.uptimeMillis(); }
+    public void onSpeechStart(int customSilenceRequirement) { lastVadSpeechStartMs = clock.now(); }
 
     public void onWakeTriggered(double score) {
         if (state != State.LISTENING) return;
@@ -164,17 +180,17 @@ public class PipelineController {
             preRoll.addLast(copy);
             while (preRoll.size() > preRollFrames) preRoll.pollFirst();
             // Frame-driven start: only on rising edge from non-speech -> speech while LISTENING
-        if (mode == Mode.SESSION && speech && !prevListeningSpeech) {
-                long now = SystemClock.uptimeMillis();
+    if (mode == Mode.SESSION && speech && !prevListeningSpeech) {
+        long now = clock.now();
                 // Respect arming delay
                 if (now - listeningArmedAtUptimeMs < minArmDelayMs) {
-                    Log.d(TAG, "Blocked start: arming delay not met");
+                    if (loggingEnabled) android.util.Log.d(TAG, "Blocked start: arming delay not met");
             diagBlockedArming++;
                 } else if (now - lastCaptureEndUptimeMs < interUtteranceCooldownMs) {
-                    Log.d(TAG, "Blocked start: inter-utterance cooldown");
+                    if (loggingEnabled) android.util.Log.d(TAG, "Blocked start: inter-utterance cooldown");
             diagBlockedCooldown++;
                 } else if (listeningSilenceFrames < requiredSilenceFramesBeforeCapture) {
-                    Log.d(TAG, "Blocked start: insufficient pre-speech silence (have=" + listeningSilenceFrames + ", need=" + requiredSilenceFramesBeforeCapture + ")");
+                    if (loggingEnabled) android.util.Log.d(TAG, "Blocked start: insufficient pre-speech silence (have=" + listeningSilenceFrames + ", need=" + requiredSilenceFramesBeforeCapture + ")");
             diagBlockedSilence++;
                 } else {
                     // Start capture
@@ -186,7 +202,7 @@ public class PipelineController {
                     }
                     capturingSpeechActive = false;
                     setState(State.CAPTURING);
-                    Log.d(TAG, "Capture started (preRollFrames=" + preRoll.size() + ")");
+                    if (loggingEnabled) android.util.Log.d(TAG, "Capture started (preRollFrames=" + preRoll.size() + ")");
                     captureStartUptimeMs = now;
             diagCaptureStarted++;
                 }
@@ -200,10 +216,10 @@ public class PipelineController {
             prevListeningSpeech = speech;
         }
         if (state == State.CAPTURING) {
-            long now = SystemClock.uptimeMillis();
+            long now = clock.now();
             // Abort if we've been capturing for a while but haven't appended any frames
             if (captureFrames.isEmpty() && (now - captureStartUptimeMs) > captureNoFramesAbortMs) {
-                Log.d(TAG, "Aborting capture: no frames received within grace window");
+                if (loggingEnabled) android.util.Log.d(TAG, "Aborting capture: no frames received within grace window");
                 captureFrames.clear();
                 capturingSpeechActive = false;
                 lastCaptureEndUptimeMs = now;
@@ -242,12 +258,12 @@ public class PipelineController {
         }
     }
 
-    public void onSpeechEnd() { lastVadSpeechEndMs = SystemClock.uptimeMillis(); }
+    public void onSpeechEnd() { lastVadSpeechEndMs = clock.now(); }
 
     public void onTranscriptionComplete() {
         if (state == State.TRANSCRIBING) {
             // go back to listening for next wake
-            lastCaptureEndUptimeMs = SystemClock.uptimeMillis();
+            lastCaptureEndUptimeMs = clock.now();
             setState(State.LISTENING);
             captureFrames.clear();
             capturingSpeechActive = false;
@@ -272,7 +288,7 @@ public class PipelineController {
             // Too short; discard and return to listening
             captureFrames.clear();
             capturingSpeechActive = false;
-            lastCaptureEndUptimeMs = SystemClock.uptimeMillis();
+            lastCaptureEndUptimeMs = clock.now();
             setState(State.LISTENING);
             diagDiscardTooShort++;
             return;
@@ -287,7 +303,7 @@ public class PipelineController {
         if (rms < 0.004f) { // conservative floor
             captureFrames.clear();
             capturingSpeechActive = false;
-            lastCaptureEndUptimeMs = SystemClock.uptimeMillis();
+            lastCaptureEndUptimeMs = clock.now();
             setState(State.LISTENING);
             diagDiscardLowRms++;
             return;
