@@ -38,6 +38,7 @@ import com.whispertflite.asr.Recorder;
 import com.whispertflite.asr.Whisper;
 import com.whispertflite.frontend.DtwWakewordDetector;
 import com.whispertflite.frontend.PipelineController;
+import com.whispertflite.frontend.BasicVad;
 import com.whispertflite.frontend.VadEnergy;
 import com.whispertflite.frontend.WakewordDetector;
 import com.whispertflite.audio.BeepPlayer;
@@ -89,7 +90,7 @@ public class MainActivity extends AppCompatActivity {
     private Recorder mRecorder = null;
     private Whisper mWhisper = null;
     private FrameEmitter frameEmitter; // new
-    private VadEnergy vadEnergy; // energy VAD (default)
+    private BasicVad vadEnergy; // basic VAD abstraction (energy default)
     private String currentVadEngine = "energy"; // energy | webrtc | silero
     private WakewordDetector wakewordDetector; // new
     private PipelineController pipelineController; // new
@@ -175,10 +176,28 @@ public class MainActivity extends AppCompatActivity {
                 if (vadEnergy == null) {
                     vadEnergy = buildEnergyVad();
                 }
-            } else {
-                // Placeholders for upcoming engines: webrtc, silero
-                // For now, fall back to energy but remember selection
-                if (vadEnergy == null) {
+            } else if ("webrtc".equals(engine)) {
+                if (!(vadEnergy instanceof com.whispertflite.frontend.VadWebRtcSimple)) {
+                    vadEnergy = new com.whispertflite.frontend.VadWebRtcSimple(0.035f, 30, new BasicVad.Listener() {
+                        @Override public void onSpeechStart() {
+                            Log.d(TAG, "VAD speech start (webrtc)");
+                            if (finalizeRunnable != null) handler.removeCallbacks(finalizeRunnable);
+                            pipelineController.onSpeechStart();
+                        }
+                        @Override public void onSpeechEnd() {
+                            Log.d(TAG, "VAD speech end (webrtc)");
+                            if (finalizeRunnable != null) handler.removeCallbacks(finalizeRunnable);
+                            finalizeRunnable = () -> pipelineController.onSpeechEnd();
+                            handler.postDelayed(finalizeRunnable, finalizeDelayMs);
+                        }
+                        @Override public void onFrameAccepted(float[] frame, boolean speech) {
+                            if (pipelineController.getState() == PipelineController.State.LISTENING && speech && wakewordDetector != null) wakewordDetector.acceptFrame(frame, true);
+                            pipelineController.onFrame(frame, speech);
+                        }
+                    });
+                }
+            } else { // silero or unknown → fallback to energy for now
+                if (vadEnergy == null || !(vadEnergy instanceof VadEnergy)) {
                     vadEnergy = buildEnergyVad();
                 }
             }
@@ -188,7 +207,7 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    private VadEnergy buildEnergyVad() {
+    private BasicVad buildEnergyVad() {
         return new VadEnergy(0.035f, 30, new VadEnergy.Listener() {
             @Override public void onSpeechStart() {
                 Log.d(TAG, "VAD speech start");
@@ -491,6 +510,7 @@ public class MainActivity extends AppCompatActivity {
             @Override public void onFrame(float[] pcmFrame) {
                 // Upstream gating: avoid feeding VAD while output is playing (no barge-in)
                 if (pipelineController != null && pipelineController.isInputGated()) return;
+                if (vadEnergy == null) return; // engine possibly being swapped; ignore frame
                 vadEnergy.accept(pcmFrame);
             }
             @Override public void onError(String msg) { Log.d(TAG, "FrameEmitter error: " + msg); }
@@ -1189,6 +1209,7 @@ public class MainActivity extends AppCompatActivity {
         } catch (Throwable t) { return "wake"; }
     }
     private void startWakeListening() {
+    ensureVadEngineInitialized();
         if (!frameEmitter.isRunning()) frameEmitter.start();
         if (pipelineController != null) {
             pipelineController.stopSession(); // ensure wake mode
@@ -1200,6 +1221,7 @@ public class MainActivity extends AppCompatActivity {
         abandonAudioFocus();
     }
     private void startSessionListening() {
+    ensureVadEngineInitialized();
         if (!frameEmitter.isRunning()) frameEmitter.start();
         if (pipelineController != null) {
             pipelineController.startSession();
