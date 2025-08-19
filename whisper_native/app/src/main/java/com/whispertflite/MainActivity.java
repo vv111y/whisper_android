@@ -191,11 +191,12 @@ public class MainActivity extends AppCompatActivity {
                     @Override public void onSpeechStart() {
                         Log.d(TAG, "VAD speech start (" + cfg.engine + ")");
                         if (finalizeRunnable != null) handler.removeCallbacks(finalizeRunnable);
-                        pipelineController.onSpeechStart(0);
+                        // hint only; pipeline starts capture on rising edge in onFrame()
                     }
                     @Override public void onSpeechEnd() {
                         Log.d(TAG, "VAD speech end (" + cfg.engine + ")");
                         if (finalizeRunnable != null) handler.removeCallbacks(finalizeRunnable);
+                        // debounce hint for logging
                         finalizeRunnable = () -> pipelineController.onSpeechEnd();
                         handler.postDelayed(finalizeRunnable, finalizeDelayMs);
                     }
@@ -232,11 +233,11 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private BasicVad buildEnergyVad() {
-    return new VadEnergy(0.035f, 30, new VadEnergy.Listener() {
+        return new com.whispertflite.frontend.VadEnergy(0.035f, 30, new com.whispertflite.frontend.VadEnergy.Listener() {
             @Override public void onSpeechStart() {
                 Log.d(TAG, "VAD speech start");
                 if (finalizeRunnable != null) handler.removeCallbacks(finalizeRunnable);
-        pipelineController.onSpeechStart(0);
+                // hint only; pipeline starts capture on rising edge in onFrame()
             }
             @Override public void onSpeechEnd() {
                 Log.d(TAG, "VAD speech end");
@@ -245,7 +246,7 @@ public class MainActivity extends AppCompatActivity {
                 handler.postDelayed(finalizeRunnable, finalizeDelayMs);
             }
             @Override public void onFrameAccepted(float[] frame, boolean speech) {
-                if (pipelineController.getState() == PipelineController.State.LISTENING && speech && wakewordDetector != null) wakewordDetector.acceptFrame(frame, true);
+                if (pipelineController.getState() == com.whispertflite.frontend.PipelineController.State.LISTENING && speech && wakewordDetector != null) wakewordDetector.acceptFrame(frame, true);
                 pipelineController.onFrame(frame, speech);
             }
         });

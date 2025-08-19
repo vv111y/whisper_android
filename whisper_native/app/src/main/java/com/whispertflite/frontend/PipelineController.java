@@ -56,6 +56,9 @@ public class PipelineController {
     private long captureNoFramesAbortMs = 1200L; // 1.2s grace
     // Track last frame speech state while LISTENING to detect rising edges only
     private boolean prevListeningSpeech = false;
+    // VAD hint timestamps (optional diagnostics)
+    private long lastVadSpeechStartMs = 0L;
+    private long lastVadSpeechEndMs = 0L;
 
     public PipelineController(int frameSamples, Listener listener) {
         this.frameSamples = frameSamples;
@@ -126,43 +129,9 @@ public class PipelineController {
     }
 
     // Handle VAD speech start: in SESSION mode, begin capturing immediately (no wakeword)
-    public void onSpeechStart() {
-        onSpeechStart(requiredSilenceFramesBeforeCapture);
-    }
-    
-    // Handle VAD speech start with custom silence requirement (for different VAD engines)
-    public void onSpeechStart(int customSilenceRequirement) {
-        if (inputGated) return;
-        if (mode == Mode.SESSION && state == State.LISTENING) {
-            long now = SystemClock.uptimeMillis();
-            // Respect arming delay right after entering LISTENING
-            if (now - listeningArmedAtUptimeMs < minArmDelayMs) {
-                Log.d(TAG, "Blocked start: arming delay not met");
-                return;
-            }
-            // Require some preceding silence before we accept a new capture start
-            if (listeningSilenceFrames < customSilenceRequirement) {
-                Log.d(TAG, "Blocked start: insufficient pre-speech silence (have=" + listeningSilenceFrames + ", need=" + customSilenceRequirement + ")");
-                return;
-            }
-            if (now - lastCaptureEndUptimeMs < interUtteranceCooldownMs) {
-                // Still in cooldown; ignore this start
-                Log.d(TAG, "Blocked start: inter-utterance cooldown");
-                return;
-            }
-            captureFrames.clear();
-            // copy pre-roll frames into capture
-            for (float[] fr : preRoll) {
-                float[] copy = new float[fr.length];
-                System.arraycopy(fr, 0, copy, 0, fr.length);
-                captureFrames.add(copy);
-            }
-            capturingSpeechActive = false;
-            setState(State.CAPTURING);
-            Log.d(TAG, "Capture started (preRollFrames=" + preRoll.size() + ")");
-            captureStartUptimeMs = now;
-        }
-    }
+    public void onSpeechStart() { lastVadSpeechStartMs = SystemClock.uptimeMillis(); }
+    // VAD hint only (no state transition)
+    public void onSpeechStart(int customSilenceRequirement) { lastVadSpeechStartMs = SystemClock.uptimeMillis(); }
 
     public void onWakeTriggered(double score) {
         if (state != State.LISTENING) return;
@@ -184,7 +153,27 @@ public class PipelineController {
             while (preRoll.size() > preRollFrames) preRoll.pollFirst();
             // Frame-driven start: only on rising edge from non-speech -> speech while LISTENING
             if (mode == Mode.SESSION && speech && !prevListeningSpeech) {
-                onSpeechStart(0);
+                long now = SystemClock.uptimeMillis();
+                // Respect arming delay
+                if (now - listeningArmedAtUptimeMs < minArmDelayMs) {
+                    Log.d(TAG, "Blocked start: arming delay not met");
+                } else if (now - lastCaptureEndUptimeMs < interUtteranceCooldownMs) {
+                    Log.d(TAG, "Blocked start: inter-utterance cooldown");
+                } else if (listeningSilenceFrames < requiredSilenceFramesBeforeCapture) {
+                    Log.d(TAG, "Blocked start: insufficient pre-speech silence (have=" + listeningSilenceFrames + ", need=" + requiredSilenceFramesBeforeCapture + ")");
+                } else {
+                    // Start capture
+                    captureFrames.clear();
+                    for (float[] fr : preRoll) {
+                        float[] prCopy = new float[fr.length];
+                        System.arraycopy(fr, 0, prCopy, 0, fr.length);
+                        captureFrames.add(prCopy);
+                    }
+                    capturingSpeechActive = false;
+                    setState(State.CAPTURING);
+                    Log.d(TAG, "Capture started (preRollFrames=" + preRoll.size() + ")");
+                    captureStartUptimeMs = now;
+                }
             }
             // Track silence frames while listening (before speech onset)
             if (speech) {
@@ -234,17 +223,7 @@ public class PipelineController {
         }
     }
 
-    public void onSpeechEnd() {
-    if (inputGated) return;
-        if (state == State.CAPTURING && capturingSpeechActive) {
-            // If we only saw a very short pause, do not finalize here; let frames continue to merge
-            if (inCaptureSilenceCount > 0 && inCaptureSilenceCount <= inCaptureSilenceFrames) {
-                // ignore this end; capturing continues until a longer pause happens
-                return;
-            }
-            finalizeCapture();
-        }
-    }
+    public void onSpeechEnd() { lastVadSpeechEndMs = SystemClock.uptimeMillis(); }
 
     public void onTranscriptionComplete() {
         if (state == State.TRANSCRIBING) {
