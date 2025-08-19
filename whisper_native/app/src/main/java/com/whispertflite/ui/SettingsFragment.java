@@ -22,6 +22,11 @@ public class SettingsFragment extends PreferenceFragmentCompat {
             // Persist and let MainActivity react via a SharedPreferences listener.
             listenMode.setOnPreferenceChangeListener((p, newVal) -> true);
         }
+            // VAD engine segmented toggle
+            Preference vadEngine = findPreference("pref_vad_engine");
+            if (vadEngine != null) {
+                vadEngine.setOnPreferenceChangeListener((p, newVal) -> true);
+            }
     // Mode selector + buttons
     Preference mode = findPreference("pref_config_mode");
     Preference btnReset = findPreference("pref_reset_defaults");

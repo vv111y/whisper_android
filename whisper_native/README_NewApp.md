@@ -72,6 +72,9 @@ Audio preprocessing
 Mode selector (Command | Chat)
 - Segmented toggle determines which set of sliders you’re editing. Each mode has its own saved values.
 
+VAD engine (Energy | WebRTC | Silero)
+- New segmented toggle selects which VAD to use. Today, Energy is active; WebRTC and Silero are selectable for experimentation and will fall back to Energy until their engines are added.
+
 VAD and pipeline sliders
 - Threshold (sensitivity)
   - Energy floor for speech start; higher = less sensitive; lower = more sensitive

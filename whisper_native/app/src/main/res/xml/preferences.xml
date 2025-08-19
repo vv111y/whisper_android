@@ -58,6 +58,9 @@
         android:defaultValue="cmd" />
 
     <PreferenceCategory android:title="VAD">
+        <com.whispertflite.ui.pref.VadEnginePreference
+            android:key="pref_vad_engine"
+            android:defaultValue="energy" />
         <SeekBarPreference
             android:key="pref_vad_threshold"
             android:title="Threshold"

@@ -89,7 +89,8 @@ public class MainActivity extends AppCompatActivity {
     private Recorder mRecorder = null;
     private Whisper mWhisper = null;
     private FrameEmitter frameEmitter; // new
-    private VadEnergy vadEnergy; // new
+    private VadEnergy vadEnergy; // energy VAD (default)
+    private String currentVadEngine = "energy"; // energy | webrtc | silero
     private WakewordDetector wakewordDetector; // new
     private PipelineController pipelineController; // new
     private ToneGenerator toneGen; // ready click
@@ -129,7 +130,7 @@ public class MainActivity extends AppCompatActivity {
     private final SharedResource transcriptionSync = new SharedResource();
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final android.content.SharedPreferences.OnSharedPreferenceChangeListener prefsListener = (sp, key) -> {
-        if ("pref_listen_mode".equals(key)) {
+    if ("pref_listen_mode".equals(key)) {
             // On mode change, go to IDLE and wait for explicit user action (app bar mic)
             try {
                 handler.post(() -> {
@@ -148,7 +149,64 @@ public class MainActivity extends AppCompatActivity {
                 });
             } catch (Throwable ignore) {}
         }
+        if ("pref_vad_engine".equals(key)) {
+            // On engine change, pause/idle to avoid live swaps; rebuild on next start
+            try {
+                handler.post(() -> {
+                    if (pipelineController != null) pipelineController.pauseListening();
+                    if (frameEmitter != null && frameEmitter.isRunning()) frameEmitter.stop();
+                    updatePlaybackState(PlaybackState.STATE_PAUSED);
+                    try { if (mediaSession != null) mediaSession.setActive(false); } catch (Throwable ignore2) {}
+                    abandonAudioFocus();
+                    try { invalidateOptionsMenu(); } catch (Throwable ignore3) {}
+                    // forget current VAD instance so it will be created with the new engine
+                    vadEnergy = null;
+                });
+            } catch (Throwable ignore) {}
+        }
     };
+
+    private void ensureVadEngineInitialized() {
+        try {
+            android.content.SharedPreferences prefs = androidx.preference.PreferenceManager.getDefaultSharedPreferences(this);
+            String engine = prefs.getString("pref_vad_engine", "energy");
+            currentVadEngine = engine;
+            if ("energy".equals(engine)) {
+                if (vadEnergy == null) {
+                    vadEnergy = buildEnergyVad();
+                }
+            } else {
+                // Placeholders for upcoming engines: webrtc, silero
+                // For now, fall back to energy but remember selection
+                if (vadEnergy == null) {
+                    vadEnergy = buildEnergyVad();
+                }
+            }
+        } catch (Throwable t) {
+            // Safety fallback
+            if (vadEnergy == null) vadEnergy = buildEnergyVad();
+        }
+    }
+
+    private VadEnergy buildEnergyVad() {
+        return new VadEnergy(0.035f, 30, new VadEnergy.Listener() {
+            @Override public void onSpeechStart() {
+                Log.d(TAG, "VAD speech start");
+                if (finalizeRunnable != null) handler.removeCallbacks(finalizeRunnable);
+                pipelineController.onSpeechStart();
+            }
+            @Override public void onSpeechEnd() {
+                Log.d(TAG, "VAD speech end");
+                if (finalizeRunnable != null) handler.removeCallbacks(finalizeRunnable);
+                finalizeRunnable = () -> pipelineController.onSpeechEnd();
+                handler.postDelayed(finalizeRunnable, finalizeDelayMs);
+            }
+            @Override public void onFrameAccepted(float[] frame, boolean speech) {
+                if (pipelineController.getState() == PipelineController.State.LISTENING && speech && wakewordDetector != null) wakewordDetector.acceptFrame(frame, true);
+                pipelineController.onFrame(frame, speech);
+            }
+        });
+    }
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -427,27 +485,8 @@ public class MainActivity extends AppCompatActivity {
                     2000,
                     score -> { Log.d(TAG, "WAKE TRIGGERED score=" + score); pipelineController.onWakeTriggered(score); });
         } catch (Exception e) { Log.d(TAG, "Wakeword init failed: " + e.getMessage()); }
-        // Initialize VAD before assigning frame emitter listener
-        // Slightly higher threshold and longer hangover to reduce false positives/splits
-        vadEnergy = new VadEnergy(0.035f, 30, new VadEnergy.Listener() {
-            @Override public void onSpeechStart() {
-                Log.d(TAG, "VAD speech start");
-                // Cancel any pending finalize to merge short gaps
-                if (finalizeRunnable != null) handler.removeCallbacks(finalizeRunnable);
-                pipelineController.onSpeechStart();
-            }
-            @Override public void onSpeechEnd() {
-                Log.d(TAG, "VAD speech end");
-                // Debounce finalization to merge brief pauses into one utterance (session mode)
-                if (finalizeRunnable != null) handler.removeCallbacks(finalizeRunnable);
-                finalizeRunnable = () -> pipelineController.onSpeechEnd();
-                handler.postDelayed(finalizeRunnable, finalizeDelayMs);
-            }
-            @Override public void onFrameAccepted(float[] frame, boolean speech) {
-                if (pipelineController.getState() == PipelineController.State.LISTENING && speech && wakewordDetector != null) wakewordDetector.acceptFrame(frame, true);
-                pipelineController.onFrame(frame, speech);
-            }
-        });
+    // Initialize VAD before assigning frame emitter listener
+    ensureVadEngineInitialized();
         frameEmitter.setListener(new FrameEmitter.Listener() {
             @Override public void onFrame(float[] pcmFrame) {
                 // Upstream gating: avoid feeding VAD while output is playing (no barge-in)
@@ -457,6 +496,7 @@ public class MainActivity extends AppCompatActivity {
             @Override public void onError(String msg) { Log.d(TAG, "FrameEmitter error: " + msg); }
         });
         btnWakeListenStart.setOnClickListener(v -> {
+            ensureVadEngineInitialized();
             if (!frameEmitter.isRunning()) frameEmitter.start();
             pipelineController.startListening();
             applyProfile(false); // command-style listen (no chat capture)
@@ -468,6 +508,7 @@ public class MainActivity extends AppCompatActivity {
 
         // Session listen wiring
         btnSessionStart.setOnClickListener(v -> {
+            ensureVadEngineInitialized();
             if (!frameEmitter.isRunning()) frameEmitter.start();
             pipelineController.startSession();
             applyProfile(false); // command defaults by default
