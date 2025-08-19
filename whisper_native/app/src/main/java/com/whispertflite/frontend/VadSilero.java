@@ -29,9 +29,9 @@ public class VadSilero implements BasicVad {
     private static final int CHUNK_SIZE = 512; // Silero VAD expects 512 samples at 16kHz
     private static final int SAMPLE_RATE = 16000;
     
-    // Edge detection parameters (tuned for 32ms frames)
-    private static final int startAttackFrames = 3;  // ~96ms
-    private static final int endReleaseFrames = 10;   // ~320ms
+    // Edge detection parameters (initial defaults)
+    private static final int DEFAULT_ATTACK_FRAMES = 3;   // ~60-96ms
+    private static final int DEFAULT_HANGOVER_FRAMES = 10; // ~200-320ms
     
     private BasicVad.Listener listener;
     private OrtEnvironment env;
@@ -46,10 +46,8 @@ public class VadSilero implements BasicVad {
     private float[] h; // hidden state
     private float[] c; // cell state (not used by all models)
     
-    // Edge detection state
-    private boolean prevSpeech = false;
-    private int hangCount = 0;
-    private int streak = 0;
+    // Edge detection state via shared EdgeDetector
+    private final EdgeDetector edgeDetector = new EdgeDetector(DEFAULT_ATTACK_FRAMES, DEFAULT_HANGOVER_FRAMES);
     private float threshold = 0.5f; // Default threshold, will be adjusted by MainActivity
 
     public VadSilero(Context context, BasicVad.Listener listener) {
@@ -125,15 +123,19 @@ public class VadSilero implements BasicVad {
 
             if (bufferPos >= CHUNK_SIZE) {
                 boolean speechDetected = processSileroChunk(buffer);
-                edgeDetect(speechDetected);
+                EdgeDetector.EdgeResult er = edgeDetector.update(speechDetected);
+                if (listener != null) {
+                    if (er.start) listener.onSpeechStart();
+                    if (er.end) listener.onSpeechEnd();
+                }
                 bufferPos = 0;
             }
         }
 
         // Emit frame-level callback with the latest speech state.
         if (listener != null) {
-            // Use current prevSpeech (updated when CHUNK_SIZE was reached).
-            listener.onFrameAccepted(audioSamples, prevSpeech);
+            // Use current inSpeech from edge detector (updated when CHUNK_SIZE was reached).
+            listener.onFrameAccepted(audioSamples, edgeDetector.isInSpeech());
         }
     }
     
@@ -196,33 +198,7 @@ public class VadSilero implements BasicVad {
         }
     }
 
-    private void edgeDetect(boolean speechLike) {
-        if (speechLike) {
-            hangCount = 0;
-            if (!prevSpeech) {
-                streak++;
-                if (streak >= startAttackFrames) {
-                    prevSpeech = true;
-                    streak = 0;
-                    if (listener != null) {
-                        listener.onSpeechStart();
-                    }
-                }
-            }
-        } else {
-            streak = 0;
-            if (prevSpeech) {
-                hangCount++;
-                if (hangCount >= endReleaseFrames) {
-                    prevSpeech = false;
-                    hangCount = 0;
-                    if (listener != null) {
-                        listener.onSpeechEnd();
-                    }
-                }
-            }
-        }
-    }
+    // Edge detection handled by EdgeDetector
 
     @Override
     public void setThreshold(float threshold) {
@@ -231,14 +207,12 @@ public class VadSilero implements BasicVad {
 
     @Override
     public void setHangoverFrames(int frames) {
-        // Not yet tunable for Silero adapter; kept for BasicVad compatibility.
-        // Will be handled by shared EdgeDetector in the refactor phases.
+    try { edgeDetector.setHangoverFrames(frames); } catch (Throwable ignore) {}
     }
 
     @Override
     public void setStartAttackFrames(int frames) {
-        // Not yet tunable for Silero adapter; kept for BasicVad compatibility.
-        // Will be handled by shared EdgeDetector in the refactor phases.
+    try { edgeDetector.setAttackFrames(frames); } catch (Throwable ignore) {}
     }
 
     @Override
@@ -248,10 +222,7 @@ public class VadSilero implements BasicVad {
             for (int i = 0; i < h.length; i++) h[i] = 0f;
         }
         
-        // Reset edge detection state
-        prevSpeech = false;
-        hangCount = 0;
-        streak = 0;
+    // Reset buffering and edge state
         bufferPos = 0;
     }
 

@@ -9,6 +9,7 @@ public class VadWebRtcNative implements BasicVad {
     private long handle = 0;
     private int sampleRate = 16000;
     private int frameLen = 320; // 20 ms at 16 kHz
+    private final EdgeDetector edge = new EdgeDetector(3, 30);
 
     public VadWebRtcNative(int aggressiveness, BasicVad.Listener listener) {
         this.listener = listener;
@@ -19,7 +20,8 @@ public class VadWebRtcNative implements BasicVad {
 
     @Override
     public void reset() {
-        // no persistent buffers in native stub; noop
+    // no persistent buffers in native stub; reset edge state only
+    try { edge.reset(); } catch (Throwable ignore) {}
     }
 
     @Override
@@ -33,48 +35,21 @@ public class VadWebRtcNative implements BasicVad {
             s[i] = (short) Math.round(v * 32767f);
         }
         int speech = nativeProcess(handle, s, sampleRate, frameLen);
-        boolean inSpeech = (speech == 1);
-    // Important: emit edge transitions BEFORE delivering the frame,
-    // so PipelineController.onSpeechStart can still see the pre-speech
-    // silence count from prior frames and enter CAPTURING.
-    edgeDetect(inSpeech);
-    if (listener != null) listener.onFrameAccepted(frame, inSpeech);
-    }
-
-    private boolean prevSpeech = false;
-    private int hangCount = 0;
-    private int hangoverFrames = 30;
-    private int startAttackFrames = 3;
-    private int streak = 0;
-    private void edgeDetect(boolean speechLike) {
-        if (speechLike) {
-            hangCount = 0;
-            if (!prevSpeech) {
-                streak++;
-                if (streak >= startAttackFrames) {
-                    prevSpeech = true;
-                    streak = 0;
-                    if (listener != null) listener.onSpeechStart();
-                }
-            }
-        } else if (prevSpeech) {
-            hangCount++;
-            if (hangCount > hangoverFrames) {
-                prevSpeech = false;
-                hangCount = 0;
-                if (listener != null) listener.onSpeechEnd();
-            }
-        } else {
-            streak = 0;
+        boolean speechLike = (speech == 1);
+        EdgeDetector.EdgeResult er = edge.update(speechLike);
+        if (listener != null) {
+            if (er.start) listener.onSpeechStart();
+            if (er.end) listener.onSpeechEnd();
+            listener.onFrameAccepted(frame, er.inSpeech);
         }
     }
 
     @Override
     public synchronized void setThreshold(float thr) { nativeSetThreshold(handle, thr); }
     @Override
-    public synchronized void setHangoverFrames(int frames) { this.hangoverFrames = Math.max(0, frames); }
+    public synchronized void setHangoverFrames(int frames) { try { edge.setHangoverFrames(Math.max(0, frames)); } catch (Throwable ignore) {} }
     @Override
-    public synchronized void setStartAttackFrames(int frames) { this.startAttackFrames = Math.max(1, frames); }
+    public synchronized void setStartAttackFrames(int frames) { try { edge.setAttackFrames(Math.max(1, frames)); } catch (Throwable ignore) {} }
 
     public synchronized void setAggressiveness(int mode) { nativeSetMode(handle, mode); }
 

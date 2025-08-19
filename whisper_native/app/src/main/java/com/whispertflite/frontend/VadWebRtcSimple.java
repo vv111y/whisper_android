@@ -8,12 +8,7 @@ package com.whispertflite.frontend;
 public class VadWebRtcSimple implements BasicVad {
     private final BasicVad.Listener listener;
 
-    private int hangoverFrames = 30;
-    private int silenceCount = 0;
-    private boolean inSpeech = false;
-    private int startAttackFrames = 3;
-    private int speechStreak = 0;
-
+    private final EdgeDetector edge = new EdgeDetector(3, 30);
     private float threshold = 0.035f; // maps RMS
     // ZCR bounds typical for voiced phonemes (heuristic)
     private float zcrMin = 0.01f;
@@ -21,15 +16,13 @@ public class VadWebRtcSimple implements BasicVad {
 
     public VadWebRtcSimple(float thresholdRms, int hangoverFrames, BasicVad.Listener listener) {
         this.threshold = thresholdRms;
-        this.hangoverFrames = hangoverFrames;
         this.listener = listener;
+        try { edge.setHangoverFrames(hangoverFrames); } catch (Throwable ignore) {}
     }
 
     @Override
     public void reset() {
-        silenceCount = 0;
-        inSpeech = false;
-        speechStreak = 0;
+        try { edge.reset(); } catch (Throwable ignore) {}
     }
 
     @Override
@@ -49,42 +42,28 @@ public class VadWebRtcSimple implements BasicVad {
 
         boolean speechLike = (rms >= threshold) && (zcr >= zcrMin && zcr <= zcrMax);
 
-        if (speechLike) {
-            silenceCount = 0;
-            speechStreak++;
-            if (!inSpeech && speechStreak >= startAttackFrames) {
-                inSpeech = true;
-                if (listener != null) listener.onSpeechStart();
-            }
-        } else if (inSpeech) {
-            silenceCount++;
-            if (silenceCount > hangoverFrames) {
-                inSpeech = false;
-                silenceCount = 0;
-                speechStreak = 0;
-                if (listener != null) listener.onSpeechEnd();
-            }
-        } else {
-            speechStreak = 0;
+        EdgeDetector.EdgeResult er = edge.update(speechLike);
+        if (listener != null) {
+            if (er.start) listener.onSpeechStart();
+            if (er.end) listener.onSpeechEnd();
+            listener.onFrameAccepted(frame, er.inSpeech);
         }
-        if (listener != null) listener.onFrameAccepted(frame, inSpeech);
     }
 
     @Override
     public synchronized void setThreshold(float thr) {
         this.threshold = Math.max(0.001f, thr);
-        silenceCount = 0;
-        speechStreak = 0;
+        try { edge.reset(); } catch (Throwable ignore) {}
     }
 
     @Override
     public synchronized void setHangoverFrames(int frames) {
-        this.hangoverFrames = Math.max(0, frames);
+        try { edge.setHangoverFrames(Math.max(0, frames)); } catch (Throwable ignore) {}
     }
 
     @Override
     public synchronized void setStartAttackFrames(int frames) {
-        this.startAttackFrames = Math.max(1, frames);
+        try { edge.setAttackFrames(Math.max(1, frames)); } catch (Throwable ignore) {}
     }
 
     // Optional tuning for zcr window
