@@ -1,6 +1,7 @@
 package com.whispertflite.frontend;
 
 import android.os.SystemClock;
+import android.util.Log;
 
 import java.util.ArrayList;
 import java.util.ArrayDeque;
@@ -10,6 +11,7 @@ import java.util.List;
  * Minimal state controller for wakeword -> capture -> transcribe (single-shot, no partials).
  */
 public class PipelineController {
+    private static final String TAG = "PipelineController";
     public enum State { IDLE, LISTENING, CAPTURING, TRANSCRIBING }
     public enum Mode { WAKEWORD, SESSION }
 
@@ -50,6 +52,8 @@ public class PipelineController {
     private long captureStartUptimeMs = 0L;
     private long maxCaptureMs = 12_000L; // 12 seconds
     private int minUtteranceFrames = 22; // ~440ms, reduce false-on short noises
+    // Safety: if CAPTURING but no frames are received, abort after a short timeout
+    private long captureNoFramesAbortMs = 1200L; // 1.2s grace
 
     public PipelineController(int frameSamples, Listener listener) {
         this.frameSamples = frameSamples;
@@ -121,15 +125,27 @@ public class PipelineController {
 
     // Handle VAD speech start: in SESSION mode, begin capturing immediately (no wakeword)
     public void onSpeechStart() {
+        onSpeechStart(requiredSilenceFramesBeforeCapture);
+    }
+    
+    // Handle VAD speech start with custom silence requirement (for different VAD engines)
+    public void onSpeechStart(int customSilenceRequirement) {
         if (inputGated) return;
         if (mode == Mode.SESSION && state == State.LISTENING) {
             long now = SystemClock.uptimeMillis();
             // Respect arming delay right after entering LISTENING
-            if (now - listeningArmedAtUptimeMs < minArmDelayMs) return;
+            if (now - listeningArmedAtUptimeMs < minArmDelayMs) {
+                Log.d(TAG, "Blocked start: arming delay not met");
+                return;
+            }
             // Require some preceding silence before we accept a new capture start
-            if (listeningSilenceFrames < requiredSilenceFramesBeforeCapture) return;
+            if (listeningSilenceFrames < customSilenceRequirement) {
+                Log.d(TAG, "Blocked start: insufficient pre-speech silence (have=" + listeningSilenceFrames + ", need=" + customSilenceRequirement + ")");
+                return;
+            }
             if (now - lastCaptureEndUptimeMs < interUtteranceCooldownMs) {
                 // Still in cooldown; ignore this start
+                Log.d(TAG, "Blocked start: inter-utterance cooldown");
                 return;
             }
             captureFrames.clear();
@@ -141,6 +157,7 @@ public class PipelineController {
             }
             capturingSpeechActive = false;
             setState(State.CAPTURING);
+            Log.d(TAG, "Capture started (preRollFrames=" + preRoll.size() + ")");
             captureStartUptimeMs = now;
         }
     }
@@ -172,6 +189,15 @@ public class PipelineController {
         }
         if (state == State.CAPTURING) {
             long now = SystemClock.uptimeMillis();
+            // Abort if we've been capturing for a while but haven't appended any frames
+            if (captureFrames.isEmpty() && (now - captureStartUptimeMs) > captureNoFramesAbortMs) {
+                Log.d(TAG, "Aborting capture: no frames received within grace window");
+                captureFrames.clear();
+                capturingSpeechActive = false;
+                lastCaptureEndUptimeMs = now;
+                setState(State.LISTENING);
+                return;
+            }
             if (capturingSpeechActive && (now - captureStartUptimeMs) > maxCaptureMs) {
                 // Force finalize to keep UX responsive
                 finalizeCapture();

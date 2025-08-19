@@ -57,6 +57,9 @@ dependencies {
     // Main TensorFlow Lite library
     implementation 'org.tensorflow:tensorflow-lite:2.14.0'
     implementation 'org.tensorflow:tensorflow-lite-support:0.4.4'
+    
+    // ONNX Runtime for Android (for Silero VAD)
+    implementation 'com.microsoft.onnxruntime:onnxruntime-android:1.19.2'
 
     // TensorFlow Lite GPU delegate for acceleration
 //    implementation 'org.tensorflow:tensorflow-lite-gpu:2.14.0'

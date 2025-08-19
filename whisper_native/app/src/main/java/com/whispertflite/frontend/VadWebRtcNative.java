@@ -34,9 +34,11 @@ public class VadWebRtcNative implements BasicVad {
         }
         int speech = nativeProcess(handle, s, sampleRate, frameLen);
         boolean inSpeech = (speech == 1);
-        if (listener != null) listener.onFrameAccepted(frame, inSpeech);
-        // Speech edges are inferred here with a tiny hangover to align with existing callbacks
-        edgeDetect(inSpeech);
+    // Important: emit edge transitions BEFORE delivering the frame,
+    // so PipelineController.onSpeechStart can still see the pre-speech
+    // silence count from prior frames and enter CAPTURING.
+    edgeDetect(inSpeech);
+    if (listener != null) listener.onFrameAccepted(frame, inSpeech);
     }
 
     private boolean prevSpeech = false;

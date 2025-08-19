@@ -40,6 +40,7 @@ import com.whispertflite.frontend.DtwWakewordDetector;
 import com.whispertflite.frontend.PipelineController;
 import com.whispertflite.frontend.BasicVad;
 import com.whispertflite.frontend.VadEnergy;
+import com.whispertflite.frontend.VadSilero;
 import com.whispertflite.frontend.WakewordDetector;
 import com.whispertflite.audio.BeepPlayer;
 import com.whispertflite.engine.WhisperEngineNative;
@@ -161,7 +162,12 @@ public class MainActivity extends AppCompatActivity {
                     try { if (mediaSession != null) mediaSession.setActive(false); } catch (Throwable ignore2) {}
                     abandonAudioFocus();
                     try { invalidateOptionsMenu(); } catch (Throwable ignore3) {}
-                    // forget current VAD instance so it will be created with the new engine
+                    // Release resources from current VAD instance
+                    if (vadEnergy instanceof com.whispertflite.frontend.VadWebRtcNative) {
+                        ((com.whispertflite.frontend.VadWebRtcNative) vadEnergy).release();
+                    } else if (vadEnergy instanceof com.whispertflite.frontend.VadSilero) {
+                        ((com.whispertflite.frontend.VadSilero) vadEnergy).release();
+                    }
                     vadEnergy = null;
                 });
             } catch (Throwable ignore) {}
@@ -176,6 +182,10 @@ public class MainActivity extends AppCompatActivity {
                     try { if (mediaSession != null) mediaSession.setActive(false); } catch (Throwable ignore2) {}
                     abandonAudioFocus();
                     try { invalidateOptionsMenu(); } catch (Throwable ignore3) {}
+                    // Release WebRTC native resources if applicable
+                    if (vadEnergy instanceof com.whispertflite.frontend.VadWebRtcNative) {
+                        ((com.whispertflite.frontend.VadWebRtcNative) vadEnergy).release();
+                    }
                     vadEnergy = null;
                 });
             } catch (Throwable ignore) {}
@@ -261,7 +271,35 @@ public class MainActivity extends AppCompatActivity {
                         } catch (Throwable ignore) {}
                     }
                 }
-            } else { // silero or unknown → fallback to energy for now
+            } else if ("silero".equals(engine)) {
+                if (!(vadEnergy instanceof com.whispertflite.frontend.VadSilero)) {
+                    vadEnergy = new com.whispertflite.frontend.VadSilero(this, new BasicVad.Listener() {
+                        @Override public void onSpeechStart() {
+                            Log.d(TAG, "VAD speech start (silero)");
+                            if (finalizeRunnable != null) handler.removeCallbacks(finalizeRunnable);
+                            pipelineController.onSpeechStart(0); // Use 0 silence requirement for Silero VAD
+                        }
+                        @Override public void onSpeechEnd() {
+                            Log.d(TAG, "VAD speech end (silero)");
+                            if (finalizeRunnable != null) handler.removeCallbacks(finalizeRunnable);
+                            finalizeRunnable = () -> pipelineController.onSpeechEnd();
+                            handler.postDelayed(finalizeRunnable, finalizeDelayMs);
+                        }
+                        @Override public void onFrameAccepted(float[] frame, boolean speech) {
+                            if (pipelineController.getState() == PipelineController.State.LISTENING && speech && wakewordDetector != null) wakewordDetector.acceptFrame(frame, true);
+                            pipelineController.onFrame(frame, speech);
+                        }
+                    });
+                    // Apply threshold mapping for Silero (0.1 to 0.9 probability range)
+                    try {
+                        int thrProg = prefs.getInt("pref_vad_threshold", 35);
+                        float thr = 0.1f + (thrProg / 100f) * (0.9f - 0.1f);
+                        vadEnergy.setThreshold(thr);
+                        vadEnergy.setHangoverFrames(prefs.getInt("pref_vad_hangover", 15));
+                        vadEnergy.setStartAttackFrames(prefs.getInt("pref_vad_attack", 2));
+                    } catch (Throwable ignore) {}
+                }
+            } else { // unknown → fallback to energy
                 if (vadEnergy == null || !(vadEnergy instanceof VadEnergy)) {
                     vadEnergy = buildEnergyVad();
                 }
@@ -1134,6 +1172,15 @@ public class MainActivity extends AppCompatActivity {
         abandonAudioFocus();
     try { if (beepPlayer != null) { beepPlayer.release(); beepPlayer = null; } } catch (Exception ignore) {}
     try { if (ttsManager != null) { ttsManager.shutdown(); ttsManager = null; } } catch (Exception ignore) {}
+    try {
+        // Release VAD resources
+        if (vadEnergy instanceof com.whispertflite.frontend.VadWebRtcNative) {
+            ((com.whispertflite.frontend.VadWebRtcNative) vadEnergy).release();
+        } else if (vadEnergy instanceof com.whispertflite.frontend.VadSilero) {
+            ((com.whispertflite.frontend.VadSilero) vadEnergy).release();
+        }
+        vadEnergy = null;
+    } catch (Exception ignore) {}
     try {
         androidx.preference.PreferenceManager.getDefaultSharedPreferences(this)
             .unregisterOnSharedPreferenceChangeListener(prefsListener);
