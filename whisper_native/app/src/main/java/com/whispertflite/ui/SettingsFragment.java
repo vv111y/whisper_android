@@ -168,6 +168,44 @@ public class SettingsFragment extends PreferenceFragmentCompat {
                 return true;
             });
         }
+
+        // Dynamically enable/disable Threshold when WebRTC/Silero is selected
+        Preference vadEnginePref = findPreference("pref_vad_engine");
+        SeekBarPreference thrPref = findPreference("pref_vad_threshold");
+        ListPreference webrtcImplPref = findPreference("pref_vad_webrtc_impl");
+        ListPreference webrtcModePref = findPreference("pref_vad_webrtc_mode");
+        if (vadEnginePref != null && thrPref != null) {
+            java.util.function.Consumer<String> updater = (engine) -> {
+                boolean energy = "energy".equals(engine);
+                thrPref.setEnabled(energy);
+                thrPref.setSummaryProvider(pref -> energy ? ("Energy threshold (maps ~0.005..0.1)") : ("Not used by selected VAD"));
+                // Also manage WebRTC aggressiveness visibility: only meaningful for native impl
+                if (webrtcImplPref != null && webrtcModePref != null) {
+                    String impl = PreferenceManager.getDefaultSharedPreferences(requireContext()).getString("pref_vad_webrtc_impl", "simple");
+                    boolean showMode = "webrtc".equals(engine) && "native".equals(impl);
+                    webrtcModePref.setEnabled(showMode);
+                    webrtcModePref.setVisible(true); // keep visible but disabled to hint
+                    webrtcModePref.setSummaryProvider(p -> showMode ? null : "Only used by Native implementation");
+                }
+            };
+            android.content.SharedPreferences sp = PreferenceManager.getDefaultSharedPreferences(requireContext());
+            String cur = sp.getString("pref_vad_engine", "energy");
+            updater.accept(cur);
+            vadEnginePref.setOnPreferenceChangeListener((p, newVal) -> {
+                updater.accept(String.valueOf(newVal));
+                return true;
+            });
+            if (webrtcImplPref != null && webrtcModePref != null) {
+                webrtcImplPref.setOnPreferenceChangeListener((p, newVal) -> {
+                    String engine = PreferenceManager.getDefaultSharedPreferences(requireContext()).getString("pref_vad_engine", "energy");
+                    boolean showMode = "webrtc".equals(engine) && "native".equals(String.valueOf(newVal));
+                    webrtcModePref.setEnabled(showMode);
+                    webrtcModePref.setVisible(true);
+                    webrtcModePref.setSummaryProvider(pp -> showMode ? null : "Only used by Native implementation");
+                    return true;
+                });
+            }
+        }
     }
 
     // Legacy: keep for internal use; no longer surfaced

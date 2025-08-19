@@ -19,4 +19,26 @@
         <item>queue</item>
         <item>flush_state</item>
     </string-array>
+
+    <string-array name="vad_webrtc_mode_entries">
+        <item>0 – Least aggressive</item>
+        <item>1</item>
+        <item>2 (default)</item>
+        <item>3 – Most aggressive</item>
+    </string-array>
+    <string-array name="vad_webrtc_mode_values">
+        <item>0</item>
+        <item>1</item>
+        <item>2</item>
+        <item>3</item>
+    </string-array>
+
+    <string-array name="vad_webrtc_impl_entries">
+        <item>Simple (Java)</item>
+        <item>Native (JNI)</item>
+    </string-array>
+    <string-array name="vad_webrtc_impl_values">
+        <item>simple</item>
+        <item>native</item>
+    </string-array>
 </resources>

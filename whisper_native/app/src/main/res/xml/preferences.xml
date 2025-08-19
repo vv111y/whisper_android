@@ -61,6 +61,20 @@
         <com.whispertflite.ui.pref.VadEnginePreference
             android:key="pref_vad_engine"
             android:defaultValue="energy" />
+        <ListPreference
+            android:key="pref_vad_webrtc_impl"
+            android:title="WebRTC implementation"
+            android:defaultValue="simple"
+            app:entries="@array/vad_webrtc_impl_entries"
+            app:entryValues="@array/vad_webrtc_impl_values"
+            app:useSimpleSummaryProvider="true" />
+        <ListPreference
+            android:key="pref_vad_webrtc_mode"
+            android:title="WebRTC aggressiveness"
+            android:defaultValue="2"
+            app:entries="@array/vad_webrtc_mode_entries"
+            app:entryValues="@array/vad_webrtc_mode_values"
+            app:useSimpleSummaryProvider="true" />
         <SeekBarPreference
             android:key="pref_vad_threshold"
             android:title="Threshold"

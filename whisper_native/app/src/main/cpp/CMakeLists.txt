@@ -10,7 +10,7 @@ set(INCLUDE_DIRS
 
 # # Check if the build is Android
 if (ANDROID)
-    add_library(audioEngine SHARED TFLiteEngine.cpp TFLiteEngineJNI.cpp)
+        add_library(audioEngine SHARED TFLiteEngine.cpp TFLiteEngineJNI.cpp WebRtcVadJNI.cpp)
     target_include_directories(audioEngine PRIVATE ${INCLUDE_DIRS})
 
     # Add 'tflite' library (imported)

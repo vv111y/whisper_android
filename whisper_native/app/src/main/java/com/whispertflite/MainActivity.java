@@ -165,6 +165,32 @@ public class MainActivity extends AppCompatActivity {
                 });
             } catch (Throwable ignore) {}
         }
+        if ("pref_vad_webrtc_impl".equals(key)) {
+            // Switching between Simple vs Native requires VAD rebuild; do the same safe pause.
+            try {
+                handler.post(() -> {
+                    if (pipelineController != null) pipelineController.pauseListening();
+                    if (frameEmitter != null && frameEmitter.isRunning()) frameEmitter.stop();
+                    updatePlaybackState(PlaybackState.STATE_PAUSED);
+                    try { if (mediaSession != null) mediaSession.setActive(false); } catch (Throwable ignore2) {}
+                    abandonAudioFocus();
+                    try { invalidateOptionsMenu(); } catch (Throwable ignore3) {}
+                    vadEnergy = null;
+                });
+            } catch (Throwable ignore) {}
+        }
+    if ("pref_vad_webrtc_mode".equals(key)) {
+            try {
+                String engine = androidx.preference.PreferenceManager.getDefaultSharedPreferences(this).getString("pref_vad_engine", "energy");
+                String impl = androidx.preference.PreferenceManager.getDefaultSharedPreferences(this).getString("pref_vad_webrtc_impl", "simple");
+        if ("webrtc".equals(engine) && "native".equals(impl) && vadEnergy instanceof com.whispertflite.frontend.VadWebRtcNative) {
+            String modeStr = androidx.preference.PreferenceManager.getDefaultSharedPreferences(this).getString("pref_vad_webrtc_mode", "2");
+            int mode = 2;
+            try { mode = Integer.parseInt(modeStr); } catch (Throwable ignore) {}
+                    ((com.whispertflite.frontend.VadWebRtcNative) vadEnergy).setAggressiveness(mode);
+                }
+            } catch (Throwable ignore) {}
+        }
     };
 
     private void ensureVadEngineInitialized() {
@@ -177,24 +203,62 @@ public class MainActivity extends AppCompatActivity {
                     vadEnergy = buildEnergyVad();
                 }
             } else if ("webrtc".equals(engine)) {
-                if (!(vadEnergy instanceof com.whispertflite.frontend.VadWebRtcSimple)) {
-                    vadEnergy = new com.whispertflite.frontend.VadWebRtcSimple(0.035f, 30, new BasicVad.Listener() {
-                        @Override public void onSpeechStart() {
-                            Log.d(TAG, "VAD speech start (webrtc)");
-                            if (finalizeRunnable != null) handler.removeCallbacks(finalizeRunnable);
-                            pipelineController.onSpeechStart();
-                        }
-                        @Override public void onSpeechEnd() {
-                            Log.d(TAG, "VAD speech end (webrtc)");
-                            if (finalizeRunnable != null) handler.removeCallbacks(finalizeRunnable);
-                            finalizeRunnable = () -> pipelineController.onSpeechEnd();
-                            handler.postDelayed(finalizeRunnable, finalizeDelayMs);
-                        }
-                        @Override public void onFrameAccepted(float[] frame, boolean speech) {
-                            if (pipelineController.getState() == PipelineController.State.LISTENING && speech && wakewordDetector != null) wakewordDetector.acceptFrame(frame, true);
-                            pipelineController.onFrame(frame, speech);
-                        }
-                    });
+                String impl = prefs.getString("pref_vad_webrtc_impl", "simple");
+                // Map slider 1..100 to RMS threshold 0.005..0.1
+                int thrProg = prefs.getInt("pref_vad_threshold", 35);
+                float thr = 0.005f + (thrProg / 100f) * (0.1f - 0.005f);
+                int hang = prefs.getInt("pref_vad_hangover", 30);
+                int atk = prefs.getInt("pref_vad_attack", 3);
+                if ("simple".equals(impl)) {
+                    if (!(vadEnergy instanceof com.whispertflite.frontend.VadWebRtcSimple)) {
+                        vadEnergy = new com.whispertflite.frontend.VadWebRtcSimple(thr, hang, new BasicVad.Listener() {
+                            @Override public void onSpeechStart() {
+                                Log.d(TAG, "VAD speech start (webrtc simple)");
+                                if (finalizeRunnable != null) handler.removeCallbacks(finalizeRunnable);
+                                pipelineController.onSpeechStart();
+                            }
+                            @Override public void onSpeechEnd() {
+                                Log.d(TAG, "VAD speech end (webrtc simple)");
+                                if (finalizeRunnable != null) handler.removeCallbacks(finalizeRunnable);
+                                finalizeRunnable = () -> pipelineController.onSpeechEnd();
+                                handler.postDelayed(finalizeRunnable, finalizeDelayMs);
+                            }
+                            @Override public void onFrameAccepted(float[] frame, boolean speech) {
+                                if (pipelineController.getState() == PipelineController.State.LISTENING && speech && wakewordDetector != null) wakewordDetector.acceptFrame(frame, true);
+                                pipelineController.onFrame(frame, speech);
+                            }
+                        });
+                        // Apply attack frames to align behavior
+                        try { vadEnergy.setStartAttackFrames(atk); } catch (Throwable ignore) {}
+                    }
+                } else { // native
+                    String modeStr = prefs.getString("pref_vad_webrtc_mode", "2"); // ListPreference stores string
+                    int mode = 2; try { mode = Integer.parseInt(modeStr); } catch (Throwable ignore) {}
+                    if (!(vadEnergy instanceof com.whispertflite.frontend.VadWebRtcNative)) {
+                        vadEnergy = new com.whispertflite.frontend.VadWebRtcNative(mode, new BasicVad.Listener() {
+                            @Override public void onSpeechStart() {
+                                Log.d(TAG, "VAD speech start (webrtc native)");
+                                if (finalizeRunnable != null) handler.removeCallbacks(finalizeRunnable);
+                                pipelineController.onSpeechStart();
+                            }
+                            @Override public void onSpeechEnd() {
+                                Log.d(TAG, "VAD speech end (webrtc native)");
+                                if (finalizeRunnable != null) handler.removeCallbacks(finalizeRunnable);
+                                finalizeRunnable = () -> pipelineController.onSpeechEnd();
+                                handler.postDelayed(finalizeRunnable, finalizeDelayMs);
+                            }
+                            @Override public void onFrameAccepted(float[] frame, boolean speech) {
+                                if (pipelineController.getState() == PipelineController.State.LISTENING && speech && wakewordDetector != null) wakewordDetector.acceptFrame(frame, true);
+                                pipelineController.onFrame(frame, speech);
+                            }
+                        });
+                        // Propagate threshold/edge tuning into native wrapper when available
+                        try {
+                            vadEnergy.setThreshold(thr);
+                            vadEnergy.setHangoverFrames(hang);
+                            vadEnergy.setStartAttackFrames(atk);
+                        } catch (Throwable ignore) {}
+                    }
                 }
             } else { // silero or unknown → fallback to energy for now
                 if (vadEnergy == null || !(vadEnergy instanceof VadEnergy)) {
