@@ -339,6 +339,14 @@ public class PipelineController {
     public void setRequiredSilenceFramesBeforeCapture(int frames) { this.requiredSilenceFramesBeforeCapture = Math.max(0, frames); }
 
     // Diagnostics accessors
+    public int getPreRollFrames() { return preRollFrames; }
+    public int getInCaptureSilenceFrames() { return inCaptureSilenceFrames; }
+    public long getInterUtteranceCooldownMs() { return interUtteranceCooldownMs; }
+    public long getMinArmDelayMs() { return minArmDelayMs; }
+    public long getMaxCaptureMs() { return maxCaptureMs; }
+    public int getMinUtteranceFrames() { return minUtteranceFrames; }
+    public long getCaptureNoFramesAbortMs() { return captureNoFramesAbortMs; }
+    public int getFrameSamples() { return frameSamples; }
     public void resetDiagnostics() {
         diagBlockedArming = diagBlockedCooldown = diagBlockedSilence = 0L;
         diagCaptureStarted = diagAbortNoFrames = diagFinalizeSilenceExceeded = 0L;

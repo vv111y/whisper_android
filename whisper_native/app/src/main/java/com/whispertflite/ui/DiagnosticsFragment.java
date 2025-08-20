@@ -110,9 +110,12 @@ public class DiagnosticsFragment extends PreferenceFragmentCompat {
                 statePref.setSummary(s);
             }
             if (gatePref != null) {
-                String s = "Arming remaining: " + pc.getArmingRemainingMs() + " ms\n" +
-                        "Cooldown remaining: " + pc.getCooldownRemainingMs() + " ms\n" +
-                        "Silence: " + pc.getListeningSilenceFrames() + "/" + pc.getRequiredSilenceFramesBeforeCapture();
+        String s = "Arming remaining: " + pc.getArmingRemainingMs() + " ms\n" +
+            "Cooldown remaining: " + pc.getCooldownRemainingMs() + " ms\n" +
+            "Silence: " + pc.getListeningSilenceFrames() + "/" + pc.getRequiredSilenceFramesBeforeCapture() + "\n" +
+            "Tunables: preRoll=" + pc.getPreRollFrames() + ", mergeSilenceFrames=" + pc.getInCaptureSilenceFrames() + "\n" +
+            "  minArmMs=" + pc.getMinArmDelayMs() + ", cooldownMs=" + pc.getInterUtteranceCooldownMs() + ", maxCaptureMs=" + pc.getMaxCaptureMs() + "\n" +
+            "  minUtterFrames=" + pc.getMinUtteranceFrames() + ", noFramesAbortMs=" + pc.getCaptureNoFramesAbortMs() + ", frameSamples=" + pc.getFrameSamples();
                 gatePref.setSummary(s);
             }
             if (countersPref != null) {
@@ -155,6 +158,16 @@ public class DiagnosticsFragment extends PreferenceFragmentCompat {
         sb.append("\"silence\":{");
         sb.append("\"current\":").append(pc.getListeningSilenceFrames()).append(',');
         sb.append("\"required\":").append(pc.getRequiredSilenceFramesBeforeCapture()).append('}').append(',');
+        sb.append("\"tunables\":{");
+        sb.append("\"preRollFrames\":").append(pc.getPreRollFrames()).append(',');
+        sb.append("\"mergeSilenceFrames\":").append(pc.getInCaptureSilenceFrames()).append(',');
+        sb.append("\"minArmDelayMs\":").append(pc.getMinArmDelayMs()).append(',');
+        sb.append("\"cooldownMs\":").append(pc.getInterUtteranceCooldownMs()).append(',');
+        sb.append("\"maxCaptureMs\":").append(pc.getMaxCaptureMs()).append(',');
+        sb.append("\"minUtterFrames\":").append(pc.getMinUtteranceFrames()).append(',');
+        sb.append("\"noFramesAbortMs\":").append(pc.getCaptureNoFramesAbortMs()).append(',');
+        sb.append("\"frameSamples\":").append(pc.getFrameSamples());
+        sb.append('}').append(',');
         sb.append("\"counters\":{");
         sb.append("\"blockedArming\":").append(pc.getDiagBlockedArming()).append(',');
         sb.append("\"blockedCooldown\":").append(pc.getDiagBlockedCooldown()).append(',');
