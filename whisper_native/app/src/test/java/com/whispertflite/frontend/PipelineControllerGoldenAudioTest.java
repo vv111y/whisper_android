@@ -604,4 +604,150 @@ public class PipelineControllerGoldenAudioTest {
         assertEquals(0.006f, m4, 1e-6f);
         assertTrue(pc.getDiagUtterancesEmitted() >= 1);
     }
+
+    @Test
+    public void long_session_stamina_many_small_utterances_without_overflow() {
+        final int frameSamples = 320;
+        FakeClock clk = new FakeClock(0);
+        SpyListener listener = new SpyListener();
+        PipelineController pc = new PipelineController(frameSamples, listener, clk);
+
+        pc.setMinArmDelayMs(0);
+        pc.setInterUtteranceCooldownMs(10);
+        pc.setRequiredSilenceFramesBeforeCapture(1);
+        pc.setPreRollFrames(0);
+        pc.setInCaptureSilenceFrames(0); // finalize on first silence
+        pc.setMinUtteranceFrames(2);
+
+        pc.startSession();
+        float[] silence = new float[frameSamples];
+        float[] speech = new float[frameSamples];
+        for (int i = 0; i < frameSamples; i++) speech[i] = 0.03f;
+
+        int cycles = 50;
+        for (int i = 0; i < cycles; i++) {
+            // Ensure cooldown elapsed
+            clk.advance(10);
+            // Required silence to arm
+            pc.onFrame(silence, false);
+            // Speech frames then silence to finalize
+            pc.onFrame(speech, true);
+            pc.onFrame(speech, true);
+            pc.onFrame(silence, false);
+            assertEquals(PipelineController.State.TRANSCRIBING, pc.getState());
+            assertNotNull(listener.lastUtterance);
+            pc.onTranscriptionComplete();
+        }
+
+        assertEquals("all captures started", cycles, pc.getDiagCaptureStarted());
+        assertEquals("all utterances emitted", cycles, pc.getDiagUtterancesEmitted());
+        assertTrue(pc.getDiagFinalizeSilenceExceeded() >= cycles);
+    }
+
+    @Test
+    public void edge_timing_on_arming_and_cooldown_boundaries() {
+        final int frameSamples = 320;
+        FakeClock clk = new FakeClock(0);
+        SpyListener listener = new SpyListener();
+        PipelineController pc = new PipelineController(frameSamples, listener, clk);
+
+        pc.setMinArmDelayMs(500);
+        pc.setInterUtteranceCooldownMs(600);
+        pc.setRequiredSilenceFramesBeforeCapture(0);
+        pc.setPreRollFrames(0);
+        pc.setInCaptureSilenceFrames(0);
+        pc.setMinUtteranceFrames(2);
+
+        pc.startSession();
+        float[] silence = new float[frameSamples];
+        float[] speech = new float[frameSamples];
+        for (int i = 0; i < frameSamples; i++) speech[i] = 0.02f;
+
+        // Attempt before arming threshold -> blocked
+        pc.onFrame(speech, true);
+        assertEquals(PipelineController.State.LISTENING, pc.getState());
+        long armingBlocks = pc.getDiagBlockedArming();
+        assertTrue(armingBlocks >= 1);
+
+    // Insert a silence frame to create a new rising edge opportunity
+    pc.onFrame(silence, false);
+
+    // Exactly at arming boundary -> should start on rising edge
+        clk.advance(500);
+    pc.onFrame(speech, true); // rising edge now that previous was silence
+    pc.onFrame(speech, true); // meet min utterance frames
+        pc.onFrame(silence, false);
+        assertEquals(PipelineController.State.TRANSCRIBING, pc.getState());
+        pc.onTranscriptionComplete();
+        long startedAfterArming = pc.getDiagCaptureStarted();
+        assertTrue(startedAfterArming >= 1);
+
+    // Just past cooldown boundary -> allowed (not blocked)
+    clk.advance(601);
+        pc.onFrame(silence, false);
+        pc.onFrame(speech, true);
+        assertEquals(PipelineController.State.CAPTURING, pc.getState());
+        // Ensure no additional cooldown block was recorded
+        assertEquals(0, pc.getDiagBlockedCooldown());
+    }
+
+    @Test
+    public void rms_threshold_boundary_low_rejects_high_accepts() {
+        final int frameSamples = 320;
+        // Case 1: Below threshold -> discard
+        {
+            FakeClock clk = new FakeClock(0);
+            SpyListener listener = new SpyListener();
+            PipelineController pc = new PipelineController(frameSamples, listener, clk);
+
+            pc.setMinArmDelayMs(0);
+            pc.setInterUtteranceCooldownMs(0);
+            pc.setRequiredSilenceFramesBeforeCapture(2);
+            pc.setPreRollFrames(0);
+            pc.setInCaptureSilenceFrames(0);
+            pc.setMinUtteranceFrames(3);
+
+            pc.startSession();
+            float[] silence = new float[frameSamples];
+            float[] low = new float[frameSamples];
+            for (int i = 0; i < frameSamples; i++) low[i] = 0.0039f; // below 0.004
+            pc.onFrame(silence, false);
+            pc.onFrame(silence, false);
+            pc.onFrame(low, true);
+            pc.onFrame(low, true);
+            pc.onFrame(low, true);
+            pc.onFrame(silence, false);
+            assertEquals(PipelineController.State.LISTENING, pc.getState());
+            assertNull(listener.lastUtterance);
+            assertTrue(pc.getDiagDiscardLowRms() >= 1);
+        }
+
+        // Case 2: Above threshold -> accept
+        {
+            FakeClock clk = new FakeClock(0);
+            SpyListener listener = new SpyListener();
+            PipelineController pc = new PipelineController(frameSamples, listener, clk);
+
+            pc.setMinArmDelayMs(0);
+            pc.setInterUtteranceCooldownMs(0);
+            pc.setRequiredSilenceFramesBeforeCapture(2);
+            pc.setPreRollFrames(0);
+            pc.setInCaptureSilenceFrames(0);
+            pc.setMinUtteranceFrames(3);
+
+            pc.startSession();
+            float[] silence = new float[frameSamples];
+            float[] high = new float[frameSamples];
+            for (int i = 0; i < frameSamples; i++) high[i] = 0.0041f; // above 0.004
+            pc.onFrame(silence, false);
+            pc.onFrame(silence, false);
+            pc.onFrame(high, true);
+            pc.onFrame(high, true);
+            pc.onFrame(high, true);
+            pc.onFrame(silence, false);
+            assertEquals(PipelineController.State.TRANSCRIBING, pc.getState());
+            assertNotNull(listener.lastUtterance);
+            assertTrue(pc.getDiagUtterancesEmitted() >= 1);
+        }
+    }
 }
