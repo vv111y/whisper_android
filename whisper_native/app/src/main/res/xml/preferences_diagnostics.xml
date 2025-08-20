@@ -65,6 +65,16 @@
             android:key="diag_preset_noisy"
             android:title="Apply preset: Noisy cafe" />
         <Preference
+            android:key="diag_preset_apply_auto"
+            android:title="Apply preset: Auto (imported)"
+            android:summary="Uses the imported Auto values"
+            />
+        <Preference
+            android:key="diag_preset_import_auto"
+            android:title="Import Auto preset (paste JSON, debug only)"
+            android:summary="Paste best_config JSON from tuner"
+            />
+        <Preference
             android:key="diag_preset_save_custom"
             android:title="Save current as Custom" />
         <Preference

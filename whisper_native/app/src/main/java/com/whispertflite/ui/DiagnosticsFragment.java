@@ -23,6 +23,8 @@ public class DiagnosticsFragment extends PreferenceFragmentCompat {
     private Preference presetQuietPref;
     private Preference presetNoisyPref;
     private Preference presetResetPref;
+    private Preference presetApplyAutoPref;
+    private Preference presetImportAutoPref;
     private Preference presetSaveCustomPref;
     private Preference presetApplyCustomPref;
     private Preference presetClearCustomPref;
@@ -58,6 +60,8 @@ public class DiagnosticsFragment extends PreferenceFragmentCompat {
     presetSaveCustomPref = findPreference("diag_preset_save_custom");
     presetApplyCustomPref = findPreference("diag_preset_apply_custom");
     presetClearCustomPref = findPreference("diag_preset_clear_custom");
+    presetApplyAutoPref = findPreference("diag_preset_apply_auto");
+    presetImportAutoPref = findPreference("diag_preset_import_auto");
     quickTuneCategory = findPreference("diag_qt_category");
     qtPreRoll = findPreference("diag_qt_preRollFrames");
     qtMergeSilence = findPreference("diag_qt_mergeSilenceFrames");
@@ -172,6 +176,8 @@ public class DiagnosticsFragment extends PreferenceFragmentCompat {
     if (presetSaveCustomPref != null) presetSaveCustomPref.setOnPreferenceClickListener(p -> { saveCustomFromCurrent(); return true; });
     if (presetApplyCustomPref != null) presetApplyCustomPref.setOnPreferenceClickListener(p -> { applyPreset("custom"); return true; });
     if (presetClearCustomPref != null) presetClearCustomPref.setOnPreferenceClickListener(p -> { clearCustomPreset(); return true; });
+    if (presetApplyAutoPref != null) presetApplyAutoPref.setOnPreferenceClickListener(p -> { applyPreset("auto"); return true; });
+    if (presetImportAutoPref != null) presetImportAutoPref.setOnPreferenceClickListener(p -> { importAutoPresetViaDialog(); return true; });
         if (logsPref != null) {
             logsPref.setOnPreferenceChangeListener((p, newVal) -> {
                 try {
@@ -331,6 +337,11 @@ public class DiagnosticsFragment extends PreferenceFragmentCompat {
                     try { android.widget.Toast.makeText(getContext(), "No Custom preset saved", android.widget.Toast.LENGTH_SHORT).show(); } catch (Throwable ignore) {}
                     return;
                 }
+            } else if ("auto".equals(which)) {
+                if (!applyAutoTo(pc)) {
+                    try { android.widget.Toast.makeText(getContext(), "No Auto preset imported", android.widget.Toast.LENGTH_SHORT).show(); } catch (Throwable ignore) {}
+                    return;
+                }
             }
             saveLastPreset(which);
             updateUi();
@@ -376,6 +387,61 @@ public class DiagnosticsFragment extends PreferenceFragmentCompat {
         } catch (Throwable ignore) {
             return false;
         }
+    }
+
+    private boolean applyAutoTo(com.whispertflite.frontend.PipelineController pc) {
+        try {
+            android.content.Context ctx = getContext(); if (ctx == null) return false;
+            android.content.SharedPreferences sp = androidx.preference.PreferenceManager.getDefaultSharedPreferences(ctx);
+            if (!sp.contains("diag_auto_preRoll")) return false;
+            pc.setPreRollFrames(sp.getInt("diag_auto_preRoll", pc.getPreRollFrames()));
+            pc.setInCaptureSilenceFrames(sp.getInt("diag_auto_mergeSilence", pc.getInCaptureSilenceFrames()));
+            pc.setMinArmDelayMs(sp.getLong("diag_auto_minArm", pc.getMinArmDelayMs()));
+            pc.setInterUtteranceCooldownMs(sp.getLong("diag_auto_cooldown", pc.getInterUtteranceCooldownMs()));
+            pc.setMaxCaptureMs(sp.getLong("diag_auto_maxCapture", pc.getMaxCaptureMs()));
+            pc.setMinUtteranceFrames(sp.getInt("diag_auto_minUtter", pc.getMinUtteranceFrames()));
+            pc.setRequiredSilenceFramesBeforeCapture(sp.getInt("diag_auto_reqSilence", pc.getRequiredSilenceFramesBeforeCapture()));
+            pc.setCaptureNoFramesAbortMs(sp.getLong("diag_auto_noFramesAbort", pc.getCaptureNoFramesAbortMs()));
+            return true;
+        } catch (Throwable ignore) {
+            return false;
+        }
+    }
+
+    private void importAutoPresetViaDialog() {
+        try {
+            if (!isDebug()) { try { android.widget.Toast.makeText(getContext(), "Debug only", android.widget.Toast.LENGTH_SHORT).show(); } catch (Throwable ignore) {} return; }
+            android.content.Context ctx = getContext(); if (ctx == null) return;
+            final android.widget.EditText input = new android.widget.EditText(ctx);
+            input.setHint("Paste best_config JSON");
+            new androidx.appcompat.app.AlertDialog.Builder(ctx)
+                    .setTitle("Import Auto preset")
+                    .setView(input)
+                    .setPositiveButton("Import", (d, w) -> {
+                        try {
+                            String txt = input.getText().toString();
+                            org.json.JSONObject jo = new org.json.JSONObject(txt);
+                            // Accept either flat fields or nested under "params"
+                            org.json.JSONObject p = jo.has("params") ? jo.getJSONObject("params") : jo;
+                            android.content.SharedPreferences sp = androidx.preference.PreferenceManager.getDefaultSharedPreferences(ctx);
+                            sp.edit()
+                                .putInt("diag_auto_preRoll", p.optInt("preRoll", 18))
+                                .putInt("diag_auto_mergeSilence", p.optInt("mergeWin", 35))
+                                .putLong("diag_auto_minArm", p.optLong("armMs", 600))
+                                .putLong("diag_auto_cooldown", p.optLong("cooldownMs", 800))
+                                .putLong("diag_auto_maxCapture", p.optLong("maxCaptureMs", 12_000))
+                                .putInt("diag_auto_minUtter", p.optInt("minUtter", 22))
+                                .putInt("diag_auto_reqSilence", p.optInt("reqSilence", 6))
+                                .putLong("diag_auto_noFramesAbort", p.optLong("noFramesAbortMs", 1200))
+                                .apply();
+                            try { android.widget.Toast.makeText(ctx, "Imported Auto preset", android.widget.Toast.LENGTH_SHORT).show(); } catch (Throwable ignore) {}
+                        } catch (Throwable t) {
+                            try { android.widget.Toast.makeText(ctx, "Failed to parse JSON", android.widget.Toast.LENGTH_SHORT).show(); } catch (Throwable ignore) {}
+                        }
+                    })
+                    .setNegativeButton("Cancel", (d, w) -> {})
+                    .show();
+        } catch (Throwable ignore) {}
     }
 
     private void clearCustomPreset() {
