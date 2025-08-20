@@ -334,4 +334,60 @@ public class PipelineControllerTest {
         assertEquals(PipelineController.State.TRANSCRIBING, pc.getState());
         assertEquals(0, pc.getDiagDiscardLowRms());
     }
+
+    @Test
+    public void finalize_by_silence_increments_counter() {
+        class FakeClock implements PipelineController.Clock { public long now(){return 0;} }
+        PipelineController pc = new PipelineController(320, null, new FakeClock());
+        pc.setLoggingEnabled(false);
+        pc.setMinArmDelayMs(0);
+        pc.setInterUtteranceCooldownMs(0);
+        pc.setRequiredSilenceFramesBeforeCapture(0);
+        pc.setInCaptureSilenceFrames(2);
+        pc.setMinUtteranceFrames(2);
+        pc.startSession();
+        float[] loud = new float[320]; for (int i=0;i<loud.length;i++) loud[i]=0.01f;
+        float[] zero = new float[320];
+        // Rising edge -> start
+        pc.onFrame(zero, false);
+        pc.onFrame(loud, true);
+        // Meet min utterance frames
+        pc.onFrame(loud, true);
+        // Silence within merge window
+        pc.onFrame(zero, false);
+        pc.onFrame(zero, false);
+        // Exceed merge window to force finalize
+        pc.onFrame(zero, false);
+        assertEquals(PipelineController.State.TRANSCRIBING, pc.getState());
+        assertEquals(1, pc.getDiagFinalizeSilenceExceeded());
+    }
+
+    @Test
+    public void does_not_finalize_before_max_duration_boundary() {
+        class FakeClock implements PipelineController.Clock { long t=0; public long now(){return t;} void tick(long ms){t+=ms;} }
+        FakeClock clock = new FakeClock();
+        PipelineController pc = new PipelineController(320, null, clock);
+        pc.setLoggingEnabled(false);
+        pc.setMinArmDelayMs(0);
+        pc.setInterUtteranceCooldownMs(0);
+        pc.setRequiredSilenceFramesBeforeCapture(0);
+        pc.setMaxCaptureMs(1000);
+        pc.setMinUtteranceFrames(1);
+        pc.startSession();
+        float[] zero = new float[320];
+        float[] loud = new float[320]; for (int i=0;i<loud.length;i++) loud[i]=0.01f;
+        // Start and provide speech
+        pc.onFrame(zero, false);
+        pc.onFrame(loud, true);
+        // Exactly at boundary: should NOT finalize
+        clock.tick(1000);
+        pc.onFrame(loud, true);
+        assertEquals(PipelineController.State.CAPTURING, pc.getState());
+        assertEquals(0, pc.getDiagFinalizeMaxDuration());
+        // Exceed boundary: should finalize and increment counter
+        clock.tick(1);
+        pc.onFrame(loud, true);
+        assertEquals(PipelineController.State.TRANSCRIBING, pc.getState());
+        assertEquals(1, pc.getDiagFinalizeMaxDuration());
+    }
 }
