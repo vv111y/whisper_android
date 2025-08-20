@@ -34,7 +34,11 @@ public final class VadFactory {
                 v.setHangoverFrames(Math.max(0, hang));
                 v.setStartAttackFrames(Math.max(1, atk));
             } catch (Throwable ignore) {}
-            return v;
+            try {
+                if (v.isReady()) return v;
+            } catch (Throwable ignore) {}
+            // Fallback to energy if Silero not ready
+            engine = "energy";
         }
 
         // Map common RMS threshold

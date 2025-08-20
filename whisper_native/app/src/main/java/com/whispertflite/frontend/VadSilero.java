@@ -319,4 +319,6 @@ public class VadSilero implements BasicVad {
         }
         isReady = false;
     }
+
+    public boolean isReady() { return isReady; }
 }
