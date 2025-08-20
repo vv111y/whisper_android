@@ -37,6 +37,7 @@ public class VadSilero implements BasicVad {
     private OrtEnvironment env;
     private OrtSession session;
     private boolean isReady = false;
+    private boolean debugLogs = false;
     
     // Audio buffering
     private float[] buffer = new float[CHUNK_SIZE];
@@ -45,6 +46,15 @@ public class VadSilero implements BasicVad {
     // LSTM state arrays (will be initialized based on model requirements)
     private float[] h; // hidden state
     private float[] c; // cell state (not used by all models)
+    // Model IO names (some Silero variants use h/c, others use a combined state)
+    private String audioInputName = "input";
+    private String sampleRateInputName = "sr";
+    private String hInputName = null; // e.g., "h"
+    private String cInputName = null; // e.g., "c"
+    private String stateInputName = null; // e.g., "state"
+    private String probOutputName = null; // e.g., "output" or "out"
+    private String hOutName = null; // e.g., "hn"
+    private String cOutName = null; // e.g., "cn"
     
     // Edge detection state via shared EdgeDetector
     private final EdgeDetector edgeDetector = new EdgeDetector(DEFAULT_ATTACK_FRAMES, DEFAULT_HANGOVER_FRAMES);
@@ -70,17 +80,34 @@ public class VadSilero implements BasicVad {
             sessionOptions.setInterOpNumThreads(1);
             
             session = env.createSession(modelFile.getAbsolutePath(), sessionOptions);
-            
-            // Log model details for debugging
-            Log.d(TAG, "Silero VAD model inputs: " + session.getInputNames());
-            Log.d(TAG, "Silero VAD model outputs: " + session.getOutputNames());
-            
-            // Get input info for debugging
-            for (String inputName : session.getInputNames()) {
-                NodeInfo inputInfo = session.getInputInfo().get(inputName);
-                if (inputInfo != null) {
-                    Log.d(TAG, "Input '" + inputName + "' info: " + inputInfo.getInfo());
+
+            // Discover IO names (be tolerant of variants)
+            try {
+                java.util.Set<String> in = session.getInputNames();
+                java.util.Set<String> out = session.getOutputNames();
+                debugLogs = detectDebug();
+                if (debugLogs) {
+                    Log.d(TAG, "Silero VAD model inputs: " + in);
+                    Log.d(TAG, "Silero VAD model outputs: " + out);
                 }
+                // Audio input
+                for (String n : in) {
+                    String ln = n.toLowerCase();
+                    if (ln.contains("wave") || ln.equals("input") || ln.contains("audio")) { audioInputName = n; }
+                    if (ln.equals("sr") || ln.contains("sample")) { sampleRateInputName = n; }
+                    if (ln.equals("h") || ln.endsWith("_h")) { hInputName = n; }
+                    if (ln.equals("c") || ln.endsWith("_c")) { cInputName = n; }
+                    if (ln.contains("state")) { stateInputName = n; }
+                }
+                // Outputs
+                for (String n : out) {
+                    String ln = n.toLowerCase();
+                    if (ln.contains("out") || ln.contains("prob") || ln.equals("output")) { probOutputName = n; }
+                    if (ln.equals("hn") || ln.endsWith("_hn") || ln.endsWith("_h")) { hOutName = n; }
+                    if (ln.equals("cn") || ln.endsWith("_cn") || ln.endsWith("_c")) { cOutName = n; }
+                }
+            } catch (Throwable t) {
+                // Non-fatal; keep defaults
             }
             
             // Initialize LSTM states
@@ -88,11 +115,21 @@ public class VadSilero implements BasicVad {
             c = null;
             
             isReady = true;
-            Log.d(TAG, "Silero VAD quantized model loaded successfully");
+            if (debugLogs) Log.d(TAG, "Silero VAD quantized model loaded successfully");
             
         } catch (OrtException | IOException e) {
             Log.e(TAG, "Failed to initialize Silero VAD: " + e.getMessage());
             isReady = false;
+        }
+    }
+
+    private static boolean detectDebug() {
+        try {
+            Class<?> c = Class.forName("com.whispertflite.BuildConfig");
+            java.lang.reflect.Field f = c.getField("DEBUG");
+            return f.getBoolean(null);
+        } catch (Throwable t) {
+            return false;
         }
     }
 
@@ -146,52 +183,89 @@ public class VadSilero implements BasicVad {
             // Create input tensor for audio samples
             long[] inputShape = {1, samples.length};
             OnnxTensor inputTensor = OnnxTensor.createTensor(env, FloatBuffer.wrap(samples), inputShape);
-            
+
             // Create sample rate tensor (16000 Hz as int64)
             long[] srShape = {1};
-            OnnxTensor srTensor = OnnxTensor.createTensor(env, LongBuffer.wrap(new long[]{16000}), srShape);
-            
-            // Create state tensor (2D: [2, 1, 128] for LSTM states) - initialize with zeros if null
-            if (h == null) {
-                h = new float[2 * 1 * 128]; // 2 layers, batch=1, hidden=128
-            }
+            OnnxTensor srTensor = OnnxTensor.createTensor(env, LongBuffer.wrap(new long[]{SAMPLE_RATE}), srShape);
+
+            // Prepare recurrent state(s)
+            if (h == null) { h = new float[2 * 1 * 128]; }
             long[] stateShape = {2, 1, 128};
-            OnnxTensor stateTensor = OnnxTensor.createTensor(env, FloatBuffer.wrap(h), stateShape);
-            
-            // Provide all required inputs
-            Map<String, OnnxTensor> inputs = Map.of(
-                "input", inputTensor,
-                "state", stateTensor, 
-                "sr", srTensor
-            );
+            OnnxTensor hTensor = null;
+            OnnxTensor cTensor = null;
+            OnnxTensor stateTensor = null;
+            java.util.HashMap<String, OnnxTensor> inputs = new java.util.HashMap<>();
+            inputs.put(audioInputName, inputTensor);
+            inputs.put(sampleRateInputName, srTensor);
+            if (stateInputName != null) {
+                stateTensor = OnnxTensor.createTensor(env, FloatBuffer.wrap(h), stateShape);
+                inputs.put(stateInputName, stateTensor);
+            } else {
+                // Separate h/c
+                hTensor = OnnxTensor.createTensor(env, FloatBuffer.wrap(h), stateShape);
+                inputs.put(hInputName != null ? hInputName : "h", hTensor);
+                if (c == null) c = new float[h.length];
+                cTensor = OnnxTensor.createTensor(env, FloatBuffer.wrap(c), stateShape);
+                inputs.put(cInputName != null ? cInputName : "c", cTensor);
+            }
+
             OrtSession.Result result = session.run(inputs);
-            
+
             // Get speech probability output and updated state
-            float[][] output = (float[][]) result.get(0).getValue(); // output
-            float speechProb = output[0][0];
-            
-            // Update state if model returns it
-            if (result.size() > 1) {
-                float[][][] newState = (float[][][]) result.get(1).getValue(); // stateN
-                // Flatten new state back to h array
-                int idx = 0;
-                for (int i = 0; i < 2; i++) {
-                    for (int j = 0; j < 1; j++) {
-                        for (int k = 0; k < 128; k++) {
-                            h[idx++] = newState[i][j][k];
-                        }
+            float speechProb = 0f;
+            try {
+                if (probOutputName != null) {
+                    float[][] out = (float[][]) result.get(probOutputName).get().getValue();
+                    speechProb = out[0][0];
+                } else {
+                    float[][] out = (float[][]) result.get(0).getValue();
+                    speechProb = out[0][0];
+                }
+            } catch (Throwable t) {
+                // Fallback indexing
+                float[][] out = (float[][]) result.get(0).getValue();
+                speechProb = out[0][0];
+            }
+
+            // Update recurrent state(s) if returned
+            try {
+                if (stateInputName != null) {
+                    // Combined state
+                    Object st = (probOutputName != null && result.size() > 1) ? result.get(1).getValue() : null;
+                    if (st instanceof float[][][]) {
+                        float[][][] newState = (float[][][]) st;
+                        int idx = 0;
+                        for (int i = 0; i < 2; i++) for (int j = 0; j < 1; j++) for (int k = 0; k < 128; k++) h[idx++] = newState[i][j][k];
+                    }
+                } else {
+                    // Separate h/c
+                    if (hOutName != null) {
+                        float[][][] hn = (float[][][]) result.get(hOutName).get().getValue();
+                        int idx = 0; for (int i = 0; i < 2; i++) for (int j = 0; j < 1; j++) for (int k = 0; k < 128; k++) h[idx++] = hn[i][j][k];
+                    } else if (result.size() > 1) {
+                        float[][][] hn = (float[][][]) result.get(1).getValue();
+                        int idx = 0; for (int i = 0; i < 2; i++) for (int j = 0; j < 1; j++) for (int k = 0; k < 128; k++) h[idx++] = hn[i][j][k];
+                    }
+                    if (cOutName != null) {
+                        float[][][] cn = (float[][][]) result.get(cOutName).get().getValue();
+                        int idx = 0; for (int i = 0; i < 2; i++) for (int j = 0; j < 1; j++) for (int k = 0; k < 128; k++) c[idx++] = cn[i][j][k];
+                    } else if (result.size() > 2) {
+                        float[][][] cn = (float[][][]) result.get(2).getValue();
+                        int idx = 0; for (int i = 0; i < 2; i++) for (int j = 0; j < 1; j++) for (int k = 0; k < 128; k++) c[idx++] = cn[i][j][k];
                     }
                 }
-            }
-            
+            } catch (Throwable ignore) { }
+
             // Clean up
-            inputTensor.close();
-            srTensor.close();
-            stateTensor.close();
-            result.close();
-            
+            try { inputTensor.close(); } catch (Throwable ignore) {}
+            try { srTensor.close(); } catch (Throwable ignore) {}
+            try { if (stateTensor != null) stateTensor.close(); } catch (Throwable ignore) {}
+            try { if (hTensor != null) hTensor.close(); } catch (Throwable ignore) {}
+            try { if (cTensor != null) cTensor.close(); } catch (Throwable ignore) {}
+            try { result.close(); } catch (Throwable ignore) {}
+
             return speechProb > threshold;
-            
+
         } catch (OrtException e) {
             Log.e(TAG, "ONNX inference failed: " + e.getMessage());
             return false;
@@ -221,9 +295,13 @@ public class VadSilero implements BasicVad {
         if (h != null) {
             for (int i = 0; i < h.length; i++) h[i] = 0f;
         }
+        if (c != null) {
+            for (int i = 0; i < c.length; i++) c[i] = 0f;
+        }
         
     // Reset buffering and edge state
         bufferPos = 0;
+        try { edgeDetector.reset(); } catch (Throwable ignore) {}
     }
 
     public void release() {
