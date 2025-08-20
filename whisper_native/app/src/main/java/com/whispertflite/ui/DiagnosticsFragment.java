@@ -14,6 +14,7 @@ public class DiagnosticsFragment extends PreferenceFragmentCompat {
     private Preference resetPref;
     private Preference refreshPref;
     private Preference exportPref;
+    private Preference docsPref;
     private Preference simulateWakePref;
     private Preference sessionCheckPref;
     private Preference cadencePref;
@@ -38,6 +39,7 @@ public class DiagnosticsFragment extends PreferenceFragmentCompat {
     resetPref = findPreference("diag_reset");
     refreshPref = findPreference("diag_refresh");
     exportPref = findPreference("diag_export");
+    docsPref = findPreference("diag_docs");
     simulateWakePref = findPreference("diag_simulate_wake");
     sessionCheckPref = findPreference("diag_session_check");
     cadencePref = findPreference("diag_cadence");
@@ -97,6 +99,19 @@ public class DiagnosticsFragment extends PreferenceFragmentCompat {
                         android.content.Intent shareIntent = android.content.Intent.createChooser(sendIntent, "Share diagnostics snapshot");
                         startActivity(shareIntent);
                     }
+                } catch (Throwable ignore) {}
+                return true;
+            });
+        }
+        if (docsPref != null) {
+            docsPref.setOnPreferenceClickListener(p -> {
+                try {
+                    android.content.Context ctx = getContext();
+                    if (ctx == null) return true;
+                    android.content.Intent i = new android.content.Intent(ctx, com.whispertflite.ui.MarkdownViewerActivity.class);
+                    i.putExtra("title", "Diagnostics docs");
+                    i.putExtra("assetPath", "docs/DIAGNOSTICS.md");
+                    startActivity(i);
                 } catch (Throwable ignore) {}
                 return true;
             });

@@ -28,6 +28,10 @@
             android:key="diag_export"
             android:title="Export snapshot (JSON)" />
         <Preference
+            android:key="diag_docs"
+            android:title="Diagnostics docs"
+            android:summary="Open in-app guide" />
+        <Preference
             android:key="diag_cadence"
             android:title="VAD callback cadence (debug only)"
             android:summary="-" />

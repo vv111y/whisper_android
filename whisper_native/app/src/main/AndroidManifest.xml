@@ -35,5 +35,10 @@
         <activity android:name="com.whispertflite.ui.SettingsActivity"
             android:exported="false"
             android:label="Settings" />
+
+        <activity
+            android:name="com.whispertflite.ui.MarkdownViewerActivity"
+            android:exported="false"
+            android:label="Diagnostics docs" />
     </application>
 </manifest>
