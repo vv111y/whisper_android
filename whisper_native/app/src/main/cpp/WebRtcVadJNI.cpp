@@ -57,6 +57,17 @@ static inline bool is_valid_frame_params(int sampleRate, int frameLen) {
     return frameLen == 160 || frameLen == 320 || frameLen == 480; // 10/20/30ms at 16k
 }
 
+static inline int nearest_supported_len(int want) {
+    const int opts[3] = {160, 320, 480};
+    int best = opts[0];
+    int bestd = std::abs(want - opts[0]);
+    for (int i = 1; i < 3; ++i) {
+        int d = std::abs(want - opts[i]);
+        if (d < bestd) { bestd = d; best = opts[i]; }
+    }
+    return best;
+}
+
 extern "C" {
 
 // Methods for class com.whispertflite.frontend.VadWebRtcNative
@@ -127,27 +138,37 @@ Java_com_whispertflite_frontend_VadWebRtcNative_nativeProcess(JNIEnv* env, jclas
     if (n <= 0) return 0;
     std::vector<int16_t> buf((size_t)n);
     env->GetShortArrayRegion(frame, 0, n, buf.data());
+    // Decide effective frame length to use (adapt if needed)
+    static bool adaptWarned = false;
+    int effLen = (int)n;
+    if (!is_valid_frame_params((int)sampleRate, (int)frameLen) || frameLen != n) {
+        int target = nearest_supported_len((int)std::min((jsize)frameLen, n));
+        if (target <= n) {
+            effLen = target;
+            if (!adaptWarned) { adaptWarned = true; LOGW("Adapting VAD frame len from n=%d, frameLen=%d to %d", (int)n, (int)frameLen, effLen); }
+        }
+    }
 #ifdef HAVE_WEBRTC_VAD
     if (!st->inst) return 0;
     // WebRTC VAD expects 10/20/30ms windows at 8/16/32k. We use 16k, 10/20/30ms (160/320/480).
     static bool warned = false;
-    if (!is_valid_frame_params((int)sampleRate, (int)frameLen) && !warned) {
+    if (!is_valid_frame_params((int)sampleRate, effLen) && !warned) {
         warned = true;
-        LOGW("Unexpected VAD params: sampleRate=%d, frameLen=%d (expected 16000 Hz, 160/320/480)", (int)sampleRate, (int)frameLen);
+        LOGW("Unexpected VAD params: sampleRate=%d, effLen=%d (expected 16000 Hz, 160/320/480)", (int)sampleRate, effLen);
     }
-    int decision = WebRtcVad_Process(st->inst, (int)sampleRate, buf.data(), (size_t)frameLen);
+    int decision = WebRtcVad_Process(st->inst, (int)sampleRate, buf.data(), (size_t)effLen);
     // WebRtcVad_Process returns 1 (speech), 0 (non-speech), -1 (error)
     if (decision < 0) return 0;
     return decision == 1 ? 1 : 0;
 #else
     // Optional: enforce typical VAD frame sizes (10/20/30ms). We accept any here.
     static bool warned = false;
-    if (!is_valid_frame_params((int)sampleRate, (int)frameLen) && !warned) {
+    if (!is_valid_frame_params((int)sampleRate, effLen) && !warned) {
         warned = true;
-        LOGW("Fallback VAD unexpected params: sampleRate=%d, frameLen=%d", (int)sampleRate, (int)frameLen);
+        LOGW("Fallback VAD unexpected params: sampleRate=%d, effLen=%d", (int)sampleRate, effLen);
     }
-    float rms = compute_rms(buf.data(), (int)n);
-    float zcr = compute_zcr(buf.data(), (int)n);
+    float rms = compute_rms(buf.data(), (int)effLen);
+    float zcr = compute_zcr(buf.data(), (int)effLen);
     // Heuristic decision approximating a VAD: energy AND plausible ZCR window
     const float zcrMin = 0.01f;
     const float zcrMax = 0.25f;
