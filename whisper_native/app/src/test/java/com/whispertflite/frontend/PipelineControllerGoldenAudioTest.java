@@ -290,4 +290,122 @@ public class PipelineControllerGoldenAudioTest {
         assertTrue("finalizeMaxDuration increments", pc.getDiagFinalizeMaxDuration() >= 1);
         assertNotNull("utterance emitted", listener.lastUtterance);
     }
+
+    @Test
+    public void gate_counters_aggregate_by_reason() {
+        final int frameSamples = 320;
+        FakeClock clk = new FakeClock(0);
+        SpyListener listener = new SpyListener();
+        PipelineController pc = new PipelineController(frameSamples, listener, clk);
+
+        pc.setPreRollFrames(1);
+        pc.setInCaptureSilenceFrames(0);
+        pc.setMinUtteranceFrames(2);
+    pc.setInterUtteranceCooldownMs(1000);
+    // Use a smaller arming delay so we can test cooldown distinctly
+    pc.setMinArmDelayMs(100);
+        pc.setRequiredSilenceFramesBeforeCapture(3);
+
+        pc.startSession();
+        float[] silence = new float[frameSamples];
+        float[] speech = new float[frameSamples];
+        for (int i = 0; i < frameSamples; i++) speech[i] = 0.02f;
+
+        // 1) Blocked by arming (no delay elapsed)
+        pc.onFrame(speech, true);
+        assertEquals(PipelineController.State.LISTENING, pc.getState());
+        assertTrue(pc.getDiagBlockedArming() >= 1);
+
+        // 2) After arming delay, blocked by insufficient silence
+        clk.advance(1000);
+        pc.onFrame(silence, false); // only 1 of required 3
+        pc.onFrame(speech, true);
+        assertEquals(PipelineController.State.LISTENING, pc.getState());
+        assertTrue(pc.getDiagBlockedSilence() >= 1);
+
+        // 3) Meet silence requirement and produce a short utterance to finalize
+        pc.onFrame(silence, false);
+        pc.onFrame(silence, false);
+        pc.onFrame(silence, false); // now >= 3 consecutive
+        pc.onFrame(speech, true);
+        pc.onFrame(speech, true);
+        pc.onFrame(silence, false); // finalize (merge window 0)
+        assertEquals(PipelineController.State.TRANSCRIBING, pc.getState());
+        // Complete transcription to start cooldown from 'now'
+        pc.onTranscriptionComplete();
+
+    // 4) Attempt re-trigger within cooldown; advance just enough to clear arming but stay in cooldown
+    clk.advance(100);
+    pc.onFrame(silence, false);
+        pc.onFrame(speech, true);
+        assertEquals(PipelineController.State.LISTENING, pc.getState());
+        assertTrue(pc.getDiagBlockedCooldown() >= 1);
+
+    // Sanity: at least one capture succeeded so far
+    assertTrue(pc.getDiagCaptureStarted() >= 1);
+    assertTrue(pc.getDiagUtterancesEmitted() >= 1);
+    }
+
+    @Test
+    public void multi_utterance_sequence_respects_cooldown_and_preroll_reset() {
+        final int frameSamples = 320;
+        FakeClock clk = new FakeClock(0);
+        SpyListener listener = new SpyListener();
+        PipelineController pc = new PipelineController(frameSamples, listener, clk);
+
+        pc.setPreRollFrames(3);
+        pc.setInCaptureSilenceFrames(0); // quick finalize on first silence
+        pc.setMinUtteranceFrames(3);
+        pc.setMinArmDelayMs(0);
+        pc.setInterUtteranceCooldownMs(600);
+        pc.setRequiredSilenceFramesBeforeCapture(2);
+
+        pc.startSession();
+        float[] silence = new float[frameSamples];
+        float[] speech = new float[frameSamples];
+        for (int i = 0; i < frameSamples; i++) speech[i] = (float)(0.03 * Math.sin(2*Math.PI*i/20.0));
+
+        // First utterance: build pre-roll, then speech, then finalize
+        pc.onFrame(silence, false);
+        pc.onFrame(silence, false);
+        pc.onFrame(silence, false);
+        pc.onFrame(speech, true);
+        pc.onFrame(speech, true);
+        pc.onFrame(speech, true);
+        pc.onFrame(silence, false); // finalize
+        assertEquals(PipelineController.State.TRANSCRIBING, pc.getState());
+        float[] utter1 = listener.lastUtterance;
+        assertNotNull(utter1);
+        pc.onTranscriptionComplete();
+
+        // Immediate re-trigger attempt should be blocked by cooldown
+        pc.onFrame(silence, false);
+        pc.onFrame(speech, true);
+        assertEquals(PipelineController.State.LISTENING, pc.getState());
+        assertTrue(pc.getDiagBlockedCooldown() >= 1);
+
+        // Wait out cooldown, rebuild pre-roll, and start second utterance
+        clk.advance(600);
+        pc.onFrame(silence, false);
+        pc.onFrame(silence, false);
+        pc.onFrame(silence, false);
+        pc.onFrame(speech, true);
+        pc.onFrame(speech, true);
+        pc.onFrame(silence, false); // finalize quickly
+        assertEquals(PipelineController.State.TRANSCRIBING, pc.getState());
+        float[] utter2 = listener.lastUtterance;
+        assertNotNull(utter2);
+
+        // Sanity: two captures started and emitted
+        assertEquals(2, pc.getDiagCaptureStarted());
+        assertEquals(2, pc.getDiagUtterancesEmitted());
+
+        // Pre-roll reset: first preRollFrames*frameSamples samples in utter2 should be zeros
+        int preSamples = pc.getPreRollFrames() * frameSamples;
+        boolean preAllZero = true;
+        for (int i = 0; i < Math.min(preSamples, utter2.length); i++) {
+            if (utter2[i] != 0f) { preAllZero = false; break; }
+        }
+        assertTrue("second utterance starts with pre-roll silence", preAllZero);
+    }
 }
