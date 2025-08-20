@@ -89,4 +89,3 @@ Debug detection
 Troubleshooting
 
 - If unit tests complain about Android Log, ensure logging is disabled in tests via `setLoggingEnabled(false)` and use the fake clock constructor.
-- If the Diagnostics screen title shows a literal ampersand, ensure `&` is escaped as `&amp;` in XML.

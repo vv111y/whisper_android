@@ -25,8 +25,8 @@ Tuning
 - Use debounce (already wired) to avoid retriggers.
 
 Next steps (future branches)
-- Session listening (no wakeword): re-arm LISTENING after TTS, play ready click.
-- Direct buffer transcription (avoid temp WAV write).
+- DONE Session listening (no wakeword): re-arm LISTENING after TTS, play ready click.
+- DONE Direct buffer transcription (avoid temp WAV write).
 - Command router and TTS.
 
 Commit messages (suggested)
