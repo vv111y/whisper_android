@@ -470,4 +470,138 @@ public class PipelineControllerGoldenAudioTest {
         // Optional finalize counters should be at least 1 for silence-exceeded path
         assertTrue(pc.getDiagFinalizeSilenceExceeded() >= 1);
     }
+
+    @Test
+    public void merge_window_bridges_short_silences_then_finalizes_on_exceed() {
+        final int frameSamples = 320;
+        FakeClock clk = new FakeClock(0);
+        SpyListener listener = new SpyListener();
+        PipelineController pc = new PipelineController(frameSamples, listener, clk);
+
+        pc.setMinArmDelayMs(0);
+        pc.setInterUtteranceCooldownMs(0);
+        pc.setRequiredSilenceFramesBeforeCapture(0);
+        pc.setPreRollFrames(0);
+        pc.setInCaptureSilenceFrames(3); // allow up to 3 silent frames without finalizing
+        pc.setMinUtteranceFrames(2);
+
+        pc.startSession();
+        float[] speech = new float[frameSamples];
+        float[] silence = new float[frameSamples];
+        for (int i = 0; i < frameSamples; i++) speech[i] = 0.03f;
+
+        // Start capture
+        pc.onFrame(speech, true);
+        assertEquals(PipelineController.State.CAPTURING, pc.getState());
+        // Add more speech to exceed min utterance
+        pc.onFrame(speech, true);
+
+        // Insert short silence run within merge window
+        pc.onFrame(silence, false);
+        pc.onFrame(silence, false);
+        pc.onFrame(silence, false); // at threshold; still in CAPTURING
+        assertEquals("still capturing across short silence", PipelineController.State.CAPTURING, pc.getState());
+
+        // Resume speech to confirm merge
+        pc.onFrame(speech, true);
+        assertEquals(PipelineController.State.CAPTURING, pc.getState());
+
+        // Now exceed merge window to force finalize
+        pc.onFrame(silence, false);
+        pc.onFrame(silence, false);
+        pc.onFrame(silence, false);
+        pc.onFrame(silence, false); // exceed threshold
+
+        assertEquals(PipelineController.State.TRANSCRIBING, pc.getState());
+        assertNotNull(listener.lastUtterance);
+        assertTrue(pc.getDiagFinalizeSilenceExceeded() >= 1);
+        assertEquals(1, pc.getDiagUtterancesEmitted());
+    }
+
+    @Test
+    public void output_gating_blocks_barge_in_until_ungated() {
+        final int frameSamples = 320;
+        FakeClock clk = new FakeClock(0);
+        SpyListener listener = new SpyListener();
+        PipelineController pc = new PipelineController(frameSamples, listener, clk);
+
+        pc.setMinArmDelayMs(0);
+        pc.setInterUtteranceCooldownMs(0);
+        pc.setRequiredSilenceFramesBeforeCapture(2);
+        pc.setPreRollFrames(2);
+        pc.setInCaptureSilenceFrames(0);
+        pc.setMinUtteranceFrames(2);
+
+        pc.startSession();
+        float[] silence = new float[frameSamples];
+        float[] speech = new float[frameSamples];
+        for (int i = 0; i < frameSamples; i++) speech[i] = 0.03f;
+
+        // Simulate earcon: gate input
+        pc.onOutputStart();
+        // While gated, attempts should be ignored (no state change, no counters)
+        pc.onFrame(silence, false);
+        pc.onFrame(speech, true);
+        pc.onFrame(speech, true);
+        assertEquals(PipelineController.State.LISTENING, pc.getState());
+        assertEquals(0, pc.getDiagBlockedArming());
+        assertEquals(0, pc.getDiagBlockedCooldown());
+        assertEquals(0, pc.getDiagBlockedSilence());
+
+        // End earcon: ungate and provide required silence before rising edge
+        pc.onOutputEnd();
+        pc.onFrame(silence, false);
+        pc.onFrame(silence, false);
+        pc.onFrame(speech, true);
+        assertEquals(PipelineController.State.CAPTURING, pc.getState());
+        pc.onFrame(speech, true);
+        pc.onFrame(silence, false); // finalize quickly (merge window 0)
+        assertEquals(PipelineController.State.TRANSCRIBING, pc.getState());
+        assertEquals(1, pc.getDiagUtterancesEmitted());
+    }
+
+    @Test
+    public void preroll_saturation_includes_only_last_N_frames() {
+        final int frameSamples = 320;
+        FakeClock clk = new FakeClock(0);
+        SpyListener listener = new SpyListener();
+        PipelineController pc = new PipelineController(frameSamples, listener, clk);
+
+        pc.setMinArmDelayMs(0);
+        pc.setInterUtteranceCooldownMs(0);
+        pc.setRequiredSilenceFramesBeforeCapture(0);
+        pc.setPreRollFrames(4); // cap
+        pc.setInCaptureSilenceFrames(0);
+        pc.setMinUtteranceFrames(2);
+
+        pc.startSession();
+        float[] speech = new float[frameSamples];
+        for (int i = 0; i < frameSamples; i++) speech[i] = 0.05f;
+
+        // Feed 6 distinct "silence" frames with markers in first sample
+        for (int k = 1; k <= 6; k++) {
+            float[] markedSilence = new float[frameSamples];
+            markedSilence[0] = 0.001f * k; // marker
+            pc.onFrame(markedSilence, false);
+        }
+
+        // Rising edge -> capture should include only last 4 pre-roll frames (markers 0.003..0.006)
+        pc.onFrame(speech, true);
+        pc.onFrame(speech, true);
+        pc.onFrame(new float[frameSamples], false); // finalize
+
+        assertEquals(PipelineController.State.TRANSCRIBING, pc.getState());
+        assertNotNull(listener.lastUtterance);
+        // Validate first-sample markers of the first 4 frames in utterance match expected 0.003..0.006
+        float[] pcm = listener.lastUtterance;
+        float m1 = pcm[0];
+        float m2 = pcm[frameSamples];
+        float m3 = pcm[2 * frameSamples];
+        float m4 = pcm[3 * frameSamples];
+        assertEquals(0.003f, m1, 1e-6f);
+        assertEquals(0.004f, m2, 1e-6f);
+        assertEquals(0.005f, m3, 1e-6f);
+        assertEquals(0.006f, m4, 1e-6f);
+        assertTrue(pc.getDiagUtterancesEmitted() >= 1);
+    }
 }
