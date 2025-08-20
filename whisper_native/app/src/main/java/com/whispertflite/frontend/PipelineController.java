@@ -225,6 +225,9 @@ public class PipelineController {
                 if (loggingEnabled) android.util.Log.d(TAG, "Capture started (preRollFrames=" + preRoll.size() + ")");
                 captureStartUptimeMs = now;
                 diagCaptureStarted++;
+                // Important: avoid double-processing this same frame in the CAPTURING branch below
+                // We already added the current frame as the first active frame; subsequent frames will be handled in future calls
+                return;
             } else {
                 // Not starting yet: maintain pre-roll with this frame
                 float[] copy = new float[frame.length];
