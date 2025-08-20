@@ -219,4 +219,75 @@ public class PipelineControllerGoldenAudioTest {
         assertTrue("abortNoFrames increments", pc.getDiagAbortNoFrames() >= 1);
         assertEquals("no utterances emitted", 0, pc.getDiagUtterancesEmitted());
     }
+
+    @Test
+    public void required_silence_gate_blocks_until_met() {
+        final int frameSamples = 320;
+        FakeClock clk = new FakeClock(0);
+        SpyListener listener = new SpyListener();
+        PipelineController pc = new PipelineController(frameSamples, listener, clk);
+
+        pc.setMinArmDelayMs(0);
+        pc.setInterUtteranceCooldownMs(0);
+        pc.setRequiredSilenceFramesBeforeCapture(3);
+        pc.setPreRollFrames(2);
+        pc.setInCaptureSilenceFrames(2);
+
+        pc.startSession();
+        float[] silence = new float[frameSamples];
+        float[] speech = new float[frameSamples];
+        for (int i = 0; i < frameSamples; i++) speech[i] = 0.02f;
+
+        // Provide insufficient silence (2 < 3)
+        pc.onFrame(silence, false);
+        pc.onFrame(silence, false);
+        // Rising edge attempt should be blocked by required silence
+        pc.onFrame(speech, true);
+        assertEquals("still LISTENING when required silence not met", PipelineController.State.LISTENING, pc.getState());
+        assertTrue("blockedSilence increments", pc.getDiagBlockedSilence() >= 1);
+
+    // Provide additional silence frames to meet requirement (need 3 consecutive)
+    pc.onFrame(silence, false);
+    pc.onFrame(silence, false);
+    pc.onFrame(silence, false);
+        // Now attempt rising edge again; should start capturing
+        pc.onFrame(speech, true);
+        assertEquals(PipelineController.State.CAPTURING, pc.getState());
+        assertTrue(pc.getDiagCaptureStarted() >= 1);
+    }
+
+    @Test
+    public void max_capture_duration_forces_finalize() {
+        final int frameSamples = 320;
+        FakeClock clk = new FakeClock(0);
+        SpyListener listener = new SpyListener();
+        PipelineController pc = new PipelineController(frameSamples, listener, clk);
+
+        pc.setMinArmDelayMs(0);
+        pc.setInterUtteranceCooldownMs(0);
+        pc.setRequiredSilenceFramesBeforeCapture(0);
+        pc.setPreRollFrames(0);
+        pc.setInCaptureSilenceFrames(100); // avoid silence finalization
+        pc.setMinUtteranceFrames(1);
+    pc.setMaxCaptureMs(1000); // respects controller's minimum cap (>=1000ms)
+
+        pc.startSession();
+        float[] speech = new float[frameSamples];
+        for (int i = 0; i < frameSamples; i++) speech[i] = 0.02f;
+
+        // Start capture on rising edge
+        pc.onFrame(speech, true); // time 0ms
+        assertEquals(PipelineController.State.CAPTURING, pc.getState());
+
+    // Feed continuous speech, advancing clock ~20ms per frame for > 1000ms
+    for (int i = 0; i < 60; i++) {
+            clk.advance(20);
+            pc.onFrame(speech, true);
+            if (pc.getState() == PipelineController.State.TRANSCRIBING) break;
+        }
+
+        assertEquals("finalized due to max duration", PipelineController.State.TRANSCRIBING, pc.getState());
+        assertTrue("finalizeMaxDuration increments", pc.getDiagFinalizeMaxDuration() >= 1);
+        assertNotNull("utterance emitted", listener.lastUtterance);
+    }
 }
