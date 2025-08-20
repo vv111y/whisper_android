@@ -390,4 +390,32 @@ public class PipelineControllerTest {
         assertEquals(PipelineController.State.TRANSCRIBING, pc.getState());
         assertEquals(1, pc.getDiagFinalizeMaxDuration());
     }
+
+    @Test
+    public void input_gated_drops_frames_and_prevents_start_until_ungated() {
+        class FakeClock implements PipelineController.Clock { public long now(){return 0;} }
+        PipelineController pc = new PipelineController(320, null, new FakeClock());
+        pc.setLoggingEnabled(false);
+        pc.setMinArmDelayMs(0);
+        pc.setInterUtteranceCooldownMs(0);
+        pc.setRequiredSilenceFramesBeforeCapture(0);
+        pc.startSession();
+        float[] loud = new float[320]; for (int i=0;i<loud.length;i++) loud[i]=0.02f;
+        float[] zero = new float[320];
+        // Gate input (simulate output playing)
+        pc.onOutputStart();
+        // Attempt to start while gated: should be ignored entirely
+        pc.onFrame(loud, true);
+        assertEquals(PipelineController.State.LISTENING, pc.getState());
+        assertEquals(0, pc.getDiagCaptureStarted());
+        assertEquals(0, pc.getDiagBlockedArming());
+        assertEquals(0, pc.getDiagBlockedCooldown());
+        assertEquals(0, pc.getDiagBlockedSilence());
+        // Ungate and allow normal rising-edge start
+        pc.onOutputEnd();
+        pc.onFrame(zero, false);
+        pc.onFrame(loud, true);
+        assertEquals(PipelineController.State.CAPTURING, pc.getState());
+        assertEquals(1, pc.getDiagCaptureStarted());
+    }
 }
