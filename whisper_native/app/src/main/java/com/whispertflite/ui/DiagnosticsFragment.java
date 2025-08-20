@@ -19,6 +19,9 @@ public class DiagnosticsFragment extends PreferenceFragmentCompat {
     private Preference sessionCheckPref;
     private Preference cadencePref;
     private Preference cadenceResetPref;
+    private Preference presetDefaultPref;
+    private Preference presetQuietPref;
+    private Preference presetNoisyPref;
     private androidx.preference.PreferenceCategory quickTuneCategory;
     private androidx.preference.SeekBarPreference qtPreRoll;
     private androidx.preference.SeekBarPreference qtMergeSilence;
@@ -44,6 +47,9 @@ public class DiagnosticsFragment extends PreferenceFragmentCompat {
     sessionCheckPref = findPreference("diag_session_check");
     cadencePref = findPreference("diag_cadence");
     cadenceResetPref = findPreference("diag_cadence_reset");
+    presetDefaultPref = findPreference("diag_preset_default");
+    presetQuietPref = findPreference("diag_preset_quiet");
+    presetNoisyPref = findPreference("diag_preset_noisy");
     quickTuneCategory = findPreference("diag_qt_category");
     qtPreRoll = findPreference("diag_qt_preRollFrames");
     qtMergeSilence = findPreference("diag_qt_mergeSilenceFrames");
@@ -151,6 +157,9 @@ public class DiagnosticsFragment extends PreferenceFragmentCompat {
                 return true;
             });
         }
+    if (presetDefaultPref != null) presetDefaultPref.setOnPreferenceClickListener(p -> { applyPreset("default"); return true; });
+    if (presetQuietPref != null) presetQuietPref.setOnPreferenceClickListener(p -> { applyPreset("quiet"); return true; });
+    if (presetNoisyPref != null) presetNoisyPref.setOnPreferenceClickListener(p -> { applyPreset("noisy"); return true; });
         if (logsPref != null) {
             logsPref.setOnPreferenceChangeListener((p, newVal) -> {
                 try {
@@ -272,6 +281,43 @@ public class DiagnosticsFragment extends PreferenceFragmentCompat {
         } catch (Throwable ignore) {}
     }
 
+    private void applyPreset(String which) {
+        try {
+            com.whispertflite.frontend.PipelineController pc = getPc();
+            if (pc == null) return;
+            if ("default".equals(which)) {
+                pc.setPreRollFrames(18);
+                pc.setInCaptureSilenceFrames(35);
+                pc.setMinArmDelayMs(600);
+                pc.setInterUtteranceCooldownMs(800);
+                pc.setMaxCaptureMs(12_000);
+                pc.setMinUtteranceFrames(22);
+                pc.setRequiredSilenceFramesBeforeCapture(6);
+                pc.setCaptureNoFramesAbortMs(1200);
+            } else if ("quiet".equals(which)) {
+                pc.setPreRollFrames(14);
+                pc.setInCaptureSilenceFrames(28);
+                pc.setMinArmDelayMs(300);
+                pc.setInterUtteranceCooldownMs(500);
+                pc.setMaxCaptureMs(10_000);
+                pc.setMinUtteranceFrames(18);
+                pc.setRequiredSilenceFramesBeforeCapture(4);
+                pc.setCaptureNoFramesAbortMs(1000);
+            } else if ("noisy".equals(which)) {
+                pc.setPreRollFrames(22);
+                pc.setInCaptureSilenceFrames(20);
+                pc.setMinArmDelayMs(800);
+                pc.setInterUtteranceCooldownMs(1200);
+                pc.setMaxCaptureMs(9_000);
+                pc.setMinUtteranceFrames(28);
+                pc.setRequiredSilenceFramesBeforeCapture(8);
+                pc.setCaptureNoFramesAbortMs(1500);
+            }
+            updateUi();
+            try { android.widget.Toast.makeText(getContext(), "Preset applied: " + which, android.widget.Toast.LENGTH_SHORT).show(); } catch (Throwable ignore) {}
+        } catch (Throwable ignore) {}
+    }
+
     private int asInt(Object v) { try { return (v instanceof Integer) ? (Integer) v : Integer.parseInt(String.valueOf(v)); } catch (Throwable t) { return 0; } }
     private long asLong(Object v) { try { return (v instanceof Integer) ? ((Integer) v).longValue() : Long.parseLong(String.valueOf(v)); } catch (Throwable t) { return 0L; } }
 
@@ -298,6 +344,24 @@ public class DiagnosticsFragment extends PreferenceFragmentCompat {
         // Build a compact JSON without external deps
         StringBuilder sb = new StringBuilder();
         sb.append('{');
+        // Version & build/device info
+        sb.append("\"version\":1,");
+        try {
+            android.content.Context ctx = getContext();
+            if (ctx != null) {
+                sb.append("\"app\":{");
+                sb.append("\"pkg\":\"").append(ctx.getPackageName()).append("\",");
+                android.content.pm.PackageInfo pi = ctx.getPackageManager().getPackageInfo(ctx.getPackageName(), 0);
+                sb.append("\"versionName\":\"").append(pi.versionName).append("\",");
+                sb.append("\"versionCode\":").append(pi.getLongVersionCode()).append('}').append(',');
+            }
+        } catch (Throwable ignore) {}
+        try {
+            sb.append("\"device\":{");
+            sb.append("\"brand\":\"").append(android.os.Build.BRAND).append("\",");
+            sb.append("\"model\":\"").append(android.os.Build.MODEL).append("\",");
+            sb.append("\"sdk\":").append(android.os.Build.VERSION.SDK_INT).append('}').append(',');
+        } catch (Throwable ignore) {}
         sb.append("\"state\":\"").append(pc.getState()).append("\",");
         sb.append("\"mode\":\"").append(pc.getMode()).append("\",");
         sb.append("\"inputGated\":").append(pc.isInputGated()).append(',');
@@ -330,7 +394,26 @@ public class DiagnosticsFragment extends PreferenceFragmentCompat {
         sb.append("\"utterancesEmitted\":").append(pc.getDiagUtterancesEmitted());
         sb.append('}');
         sb.append('}');
+        // Cadence summary (debug only field, best-effort)
+        try {
+            com.whispertflite.MainActivity act = (com.whispertflite.MainActivity) getActivity();
+            if (act != null) {
+                java.lang.reflect.Field f = com.whispertflite.MainActivity.class.getDeclaredField("vadCadence");
+                f.setAccessible(true);
+                Object cm = f.get(act);
+                if (cm instanceof com.whispertflite.frontend.CadenceMonitor) {
+                    String summary = ((com.whispertflite.frontend.CadenceMonitor) cm).summary();
+                    sb.append(',').append("\"cadence\":\"").append(escape(summary)).append("\"");
+                }
+            }
+        } catch (Throwable ignore) {}
+        sb.append('}');
         return sb.toString();
+    }
+
+    private static String escape(String s) {
+        if (s == null) return "";
+        return s.replace("\\", "\\\\").replace("\"", "\\\"");
     }
 
     // Debug-only: synthetic gating simulation to validate session behavior without mic

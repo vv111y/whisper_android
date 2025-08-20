@@ -54,6 +54,18 @@
             android:defaultValue="false" />
     </PreferenceCategory>
 
+    <PreferenceCategory android:title="Presets">
+        <Preference
+            android:key="diag_preset_default"
+            android:title="Apply preset: Default" />
+        <Preference
+            android:key="diag_preset_quiet"
+            android:title="Apply preset: Quiet room" />
+        <Preference
+            android:key="diag_preset_noisy"
+            android:title="Apply preset: Noisy cafe" />
+    </PreferenceCategory>
+
     <PreferenceCategory
         android:key="diag_qt_category"
         android:title="Quick tune (debug only)">
