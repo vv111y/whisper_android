@@ -15,6 +15,7 @@ public class DiagnosticsFragment extends PreferenceFragmentCompat {
     private Preference refreshPref;
     private Preference exportPref;
     private Preference simulateWakePref;
+    private Preference sessionCheckPref;
     private androidx.preference.PreferenceCategory quickTuneCategory;
     private androidx.preference.SeekBarPreference qtPreRoll;
     private androidx.preference.SeekBarPreference qtMergeSilence;
@@ -36,6 +37,7 @@ public class DiagnosticsFragment extends PreferenceFragmentCompat {
     refreshPref = findPreference("diag_refresh");
     exportPref = findPreference("diag_export");
     simulateWakePref = findPreference("diag_simulate_wake");
+    sessionCheckPref = findPreference("diag_session_check");
     quickTuneCategory = findPreference("diag_qt_category");
     qtPreRoll = findPreference("diag_qt_preRollFrames");
     qtMergeSilence = findPreference("diag_qt_mergeSilenceFrames");
@@ -49,6 +51,7 @@ public class DiagnosticsFragment extends PreferenceFragmentCompat {
         boolean dbg = isDebug();
         if (logsPref != null) logsPref.setVisible(dbg);
         if (simulateWakePref != null) simulateWakePref.setVisible(dbg);
+    if (sessionCheckPref != null) sessionCheckPref.setVisible(dbg);
         // Hide quick tune sliders in release builds
         if (!dbg) {
             if (quickTuneCategory != null) quickTuneCategory.setVisible(false);
@@ -101,6 +104,12 @@ public class DiagnosticsFragment extends PreferenceFragmentCompat {
                     pc.onWakeTriggered(0.99);
                     updateUi();
                 } catch (Throwable ignore) {}
+                return true;
+            });
+        }
+        if (sessionCheckPref != null) {
+            sessionCheckPref.setOnPreferenceClickListener(p -> {
+                try { runSessionSelfCheck(); } catch (Throwable ignore) {}
                 return true;
             });
         }
@@ -267,5 +276,59 @@ public class DiagnosticsFragment extends PreferenceFragmentCompat {
         sb.append('}');
         sb.append('}');
         return sb.toString();
+    }
+
+    // Debug-only: synthetic gating simulation to validate session behavior without mic
+    private void runSessionSelfCheck() {
+        if (!isDebug()) return;
+        com.whispertflite.frontend.PipelineController pc = getPc();
+        if (pc == null) return;
+        // Snapshot tunables and then run a deterministic simulation
+        int frameSamples = pc.getFrameSamples();
+        // Build some synthetic frames: silence, then speech blocks, then silence
+        float[] silence = new float[frameSamples];
+        float[] speech = new float[frameSamples];
+        for (int i = 0; i < frameSamples; i++) speech[i] = (float) (0.02 * Math.sin(2 * Math.PI * i / 20.0));
+
+        StringBuilder report = new StringBuilder();
+        report.append("Session self-check:\n");
+        try {
+            // Start session
+            pc.startSession();
+            // 1) Immediately try to start with no silence -> should block on silence/arming
+            int attempts = 5;
+            for (int i = 0; i < attempts; i++) pc.onFrame(speech, true);
+            boolean blockedByArming = pc.getDiagBlockedArming() > 0 || pc.getArmingRemainingMs() > 0;
+            boolean blockedBySilence = pc.getDiagBlockedSilence() > 0 || pc.getListeningSilenceFrames() < pc.getRequiredSilenceFramesBeforeCapture();
+            report.append("- Rising edge before arming/silence: ")
+                  .append(blockedByArming || blockedBySilence ? "blocked (OK)" : "not blocked (check)").append('\n');
+
+            // 2) Feed enough silence frames to satisfy required silence
+            int reqSil = pc.getRequiredSilenceFramesBeforeCapture();
+            for (int i = 0; i < reqSil + 1; i++) pc.onFrame(silence, false);
+            // 3) Provide speech to trigger capture (respecting cooldown/arming)
+            for (int i = 0; i < pc.getPreRollFrames() + 2; i++) pc.onFrame(silence, false);
+            pc.onFrame(speech, true);
+            // While capturing, provide min utterance frames worth of speech
+            int minUtter = pc.getMinUtteranceFrames();
+            for (int i = 0; i < minUtter + 2; i++) pc.onFrame(speech, true);
+            // Then enough silence to force finalize via merge window
+            for (int i = 0; i < pc.getInCaptureSilenceFrames() + 1; i++) pc.onFrame(silence, false);
+            // At this point, we expect either TRANSCRIBING or back to LISTENING depending on listener
+            com.whispertflite.frontend.PipelineController.State st = pc.getState();
+            report.append("- Finalize after merge window: state=").append(st).append('\n');
+
+            // 4) Cooldown check: immediately attempt another start should be blocked
+            pc.onFrame(speech, true);
+            boolean cooldownBlocks = pc.getDiagBlockedCooldown() > 0 || pc.getCooldownRemainingMs() > 0;
+            report.append("- Cooldown blocks immediate retrigger: ").append(cooldownBlocks ? "yes" : "no").append('\n');
+        } catch (Throwable t) {
+            report.append("Error: ").append(t.getMessage()).append('\n');
+        }
+
+        try {
+            android.widget.Toast.makeText(getContext(), report.toString(), android.widget.Toast.LENGTH_LONG).show();
+        } catch (Throwable ignore) {}
+        updateUi();
     }
 }
