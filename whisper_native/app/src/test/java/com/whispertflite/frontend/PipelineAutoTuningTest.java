@@ -222,5 +222,32 @@ public class PipelineAutoTuningTest {
 
         // Sanity: best score should be above a minimum baseline
         assertTrue("Best score should exceed baseline", scored.get(0)[0] > 150);
+
+        // Persist best config to build/auto_tune/best_config.json for easy import
+        try {
+            int bestIdx = scored.get(0)[1];
+            ParamSet bp = candidates.get(bestIdx);
+            org.json.JSONObject jo = new org.json.JSONObject();
+            org.json.JSONObject params = new org.json.JSONObject();
+            params.put("preRoll", bp.preRollFrames);
+            params.put("mergeWin", bp.inCaptureSilenceFrames);
+            params.put("minUtter", bp.minUtteranceFrames);
+            params.put("reqSilence", bp.requiredSilenceFrames);
+            params.put("armMs", bp.minArmDelayMs);
+            params.put("cooldownMs", bp.cooldownMs);
+            // include common safety fields so import sets all in one go
+            params.put("maxCaptureMs", 12_000);
+            params.put("noFramesAbortMs", 1_200);
+            jo.put("params", params);
+            jo.put("score", scored.get(0)[0]);
+
+            java.nio.file.Path outDir = java.nio.file.Paths.get("build", "auto_tune");
+            java.nio.file.Files.createDirectories(outDir);
+            java.nio.file.Path out = outDir.resolve("best_config.json");
+            java.nio.file.Files.write(out, jo.toString(2).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            System.out.println("Wrote best config to: " + out.toAbsolutePath());
+        } catch (Throwable t) {
+            System.out.println("Failed to write best_config.json: " + t);
+        }
     }
 }

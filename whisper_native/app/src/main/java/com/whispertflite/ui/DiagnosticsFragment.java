@@ -413,7 +413,7 @@ public class DiagnosticsFragment extends PreferenceFragmentCompat {
             if (!isDebug()) { try { android.widget.Toast.makeText(getContext(), "Debug only", android.widget.Toast.LENGTH_SHORT).show(); } catch (Throwable ignore) {} return; }
             android.content.Context ctx = getContext(); if (ctx == null) return;
             final android.widget.EditText input = new android.widget.EditText(ctx);
-            input.setHint("Paste best_config JSON");
+            input.setHint("Paste best_config JSON (or use Pick File)");
             new androidx.appcompat.app.AlertDialog.Builder(ctx)
                     .setTitle("Import Auto preset")
                     .setView(input)
@@ -439,9 +439,49 @@ public class DiagnosticsFragment extends PreferenceFragmentCompat {
                             try { android.widget.Toast.makeText(ctx, "Failed to parse JSON", android.widget.Toast.LENGTH_SHORT).show(); } catch (Throwable ignore) {}
                         }
                     })
+                    .setNeutralButton("Pick File", (d, w) -> {
+                        try {
+                            android.content.Intent intent = new android.content.Intent(android.content.Intent.ACTION_GET_CONTENT);
+                            intent.setType("application/json");
+                            intent.addCategory(android.content.Intent.CATEGORY_OPENABLE);
+                            startActivityForResult(android.content.Intent.createChooser(intent, "Select best_config.json"), 9911);
+                        } catch (Throwable t) {
+                            try { android.widget.Toast.makeText(ctx, "File picker failed", android.widget.Toast.LENGTH_SHORT).show(); } catch (Throwable ignore) {}
+                        }
+                    })
                     .setNegativeButton("Cancel", (d, w) -> {})
                     .show();
         } catch (Throwable ignore) {}
+    }
+
+    @Override
+    public void onActivityResult(int requestCode, int resultCode, android.content.Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == 9911 && resultCode == android.app.Activity.RESULT_OK) {
+            try {
+                android.content.Context ctx = getContext(); if (ctx == null || data == null) return;
+                android.net.Uri uri = data.getData(); if (uri == null) return;
+                java.io.InputStream is = ctx.getContentResolver().openInputStream(uri);
+                if (is == null) return;
+                java.util.Scanner s = new java.util.Scanner(is).useDelimiter("\\A");
+                String txt = s.hasNext() ? s.next() : "";
+                is.close();
+                org.json.JSONObject jo = new org.json.JSONObject(txt);
+                org.json.JSONObject p = jo.has("params") ? jo.getJSONObject("params") : jo;
+                android.content.SharedPreferences sp = androidx.preference.PreferenceManager.getDefaultSharedPreferences(ctx);
+                sp.edit()
+                    .putInt("diag_auto_preRoll", p.optInt("preRoll", 18))
+                    .putInt("diag_auto_mergeSilence", p.optInt("mergeWin", 35))
+                    .putLong("diag_auto_minArm", p.optLong("armMs", 600))
+                    .putLong("diag_auto_cooldown", p.optLong("cooldownMs", 800))
+                    .putLong("diag_auto_maxCapture", p.optLong("maxCaptureMs", 12_000))
+                    .putInt("diag_auto_minUtter", p.optInt("minUtter", 22))
+                    .putInt("diag_auto_reqSilence", p.optInt("reqSilence", 6))
+                    .putLong("diag_auto_noFramesAbort", p.optLong("noFramesAbortMs", 1200))
+                    .apply();
+                try { android.widget.Toast.makeText(ctx, "Imported Auto preset from file", android.widget.Toast.LENGTH_SHORT).show(); } catch (Throwable ignore) {}
+            } catch (Throwable ignore) {}
+        }
     }
 
     private void clearCustomPreset() {

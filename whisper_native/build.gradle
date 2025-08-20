@@ -29,3 +29,15 @@ tasks.register("localCiConnected") {
     description = "Run connected Android tests on a device/emulator (screen must be awake)."
     dependsOn(":app:connectedDebugAndroidTest")
 }
+
+// Convenience task to run the auto-tuner and produce build/auto_tune/best_config.json
+tasks.register("tuneVad") {
+    group = "verification"
+    description = "Run auto-tuning scenarios to suggest VAD pipeline tunables. Outputs build/auto_tune/best_config.json"
+    doLast {
+        exec {
+            commandLine "./gradlew", "-q", "app:testDebugUnitTest", "-Dtune=true"
+        }
+        println("If successful, see build/auto_tune/best_config.json")
+    }
+}

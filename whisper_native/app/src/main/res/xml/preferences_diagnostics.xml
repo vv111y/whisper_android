@@ -71,8 +71,8 @@
             />
         <Preference
             android:key="diag_preset_import_auto"
-            android:title="Import Auto preset (paste JSON, debug only)"
-            android:summary="Paste best_config JSON from tuner"
+            android:title="Import Auto preset (paste or pick file, debug only)"
+            android:summary="Paste or pick best_config.json from tuner"
             />
         <Preference
             android:key="diag_preset_save_custom"
