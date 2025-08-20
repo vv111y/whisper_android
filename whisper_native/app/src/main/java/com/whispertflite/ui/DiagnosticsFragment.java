@@ -13,6 +13,8 @@ public class DiagnosticsFragment extends PreferenceFragmentCompat {
     private SwitchPreferenceCompat logsPref;
     private Preference resetPref;
     private Preference refreshPref;
+    private Preference exportPref;
+    private Preference simulateWakePref;
 
     @Override
     public void onCreatePreferences(Bundle savedInstanceState, String rootKey) {
@@ -21,10 +23,13 @@ public class DiagnosticsFragment extends PreferenceFragmentCompat {
         gatePref = findPreference("diag_gates");
         countersPref = findPreference("diag_counters");
         logsPref = findPreference("diag_verbose_logs");
-        resetPref = findPreference("diag_reset");
+    resetPref = findPreference("diag_reset");
         refreshPref = findPreference("diag_refresh");
+    exportPref = findPreference("diag_export");
+    simulateWakePref = findPreference("diag_simulate_wake");
 
     if (logsPref != null) logsPref.setVisible(isDebug());
+    if (simulateWakePref != null) simulateWakePref.setVisible(isDebug());
 
         if (resetPref != null) {
             resetPref.setOnPreferenceClickListener(p -> {
@@ -40,6 +45,37 @@ public class DiagnosticsFragment extends PreferenceFragmentCompat {
         }
         if (refreshPref != null) {
             refreshPref.setOnPreferenceClickListener(p -> { updateUi(); return true; });
+        }
+        if (exportPref != null) {
+            exportPref.setOnPreferenceClickListener(p -> {
+                try {
+                    com.whispertflite.MainActivity act = (com.whispertflite.MainActivity) getActivity();
+                    if (act != null && act.getPipelineController() != null) {
+                        String json = buildSnapshotJson(act.getPipelineController());
+                        android.content.Intent sendIntent = new android.content.Intent(android.content.Intent.ACTION_SEND);
+                        sendIntent.setType("application/json");
+                        sendIntent.putExtra(android.content.Intent.EXTRA_TEXT, json);
+                        android.content.Intent shareIntent = android.content.Intent.createChooser(sendIntent, "Share diagnostics snapshot");
+                        startActivity(shareIntent);
+                    }
+                } catch (Throwable ignore) {}
+                return true;
+            });
+        }
+        if (simulateWakePref != null) {
+            simulateWakePref.setOnPreferenceClickListener(p -> {
+                try {
+                    com.whispertflite.MainActivity act = (com.whispertflite.MainActivity) getActivity();
+                    if (act != null && act.getPipelineController() != null) {
+                        // simulate a wake trigger and start listening/capturing path
+                        com.whispertflite.frontend.PipelineController pc = act.getPipelineController();
+                        pc.startListening();
+                        pc.onWakeTriggered(0.99);
+                        updateUi();
+                    }
+                } catch (Throwable ignore) {}
+                return true;
+            });
         }
         if (logsPref != null) {
             logsPref.setOnPreferenceChangeListener((p, newVal) -> {
@@ -104,5 +140,34 @@ public class DiagnosticsFragment extends PreferenceFragmentCompat {
         } catch (Throwable t) {
             return false;
         }
+    }
+
+    private String buildSnapshotJson(com.whispertflite.frontend.PipelineController pc) {
+        // Build a compact JSON without external deps
+        StringBuilder sb = new StringBuilder();
+        sb.append('{');
+        sb.append("\"state\":\"").append(pc.getState()).append("\",");
+        sb.append("\"mode\":\"").append(pc.getMode()).append("\",");
+        sb.append("\"inputGated\":").append(pc.isInputGated()).append(',');
+        sb.append("\"loggingEnabled\":").append(pc.isLoggingEnabled()).append(',');
+        sb.append("\"armingRemainingMs\":").append(pc.getArmingRemainingMs()).append(',');
+        sb.append("\"cooldownRemainingMs\":").append(pc.getCooldownRemainingMs()).append(',');
+        sb.append("\"silence\":{");
+        sb.append("\"current\":").append(pc.getListeningSilenceFrames()).append(',');
+        sb.append("\"required\":").append(pc.getRequiredSilenceFramesBeforeCapture()).append('}').append(',');
+        sb.append("\"counters\":{");
+        sb.append("\"blockedArming\":").append(pc.getDiagBlockedArming()).append(',');
+        sb.append("\"blockedCooldown\":").append(pc.getDiagBlockedCooldown()).append(',');
+        sb.append("\"blockedSilence\":").append(pc.getDiagBlockedSilence()).append(',');
+        sb.append("\"captureStarted\":").append(pc.getDiagCaptureStarted()).append(',');
+        sb.append("\"abortNoFrames\":").append(pc.getDiagAbortNoFrames()).append(',');
+        sb.append("\"finalizeSilenceExceeded\":").append(pc.getDiagFinalizeSilenceExceeded()).append(',');
+        sb.append("\"finalizeMaxDuration\":").append(pc.getDiagFinalizeMaxDuration()).append(',');
+        sb.append("\"discardTooShort\":").append(pc.getDiagDiscardTooShort()).append(',');
+        sb.append("\"discardLowRms\":").append(pc.getDiagDiscardLowRms()).append(',');
+        sb.append("\"utterancesEmitted\":").append(pc.getDiagUtterancesEmitted());
+        sb.append('}');
+        sb.append('}');
+        return sb.toString();
     }
 }

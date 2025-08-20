@@ -64,3 +64,29 @@ Accessible via getters and reset with `resetDiagnostics()`.
 
 - `onSpeechStart/End` are diagnostic hints only; starts are driven by per-frame updates.
 - Consider exposing a simple UI action to dump/reset diagnostics for field tuning.
+
+## Diagnostics UI (Settings → Diagnostics)
+
+Purpose: Inspect pipeline state/gates and counters at runtime, toggle verbose logs in debug, and export a snapshot.
+
+- Status
+  - “State & input gate”: current `State` and whether input is gated.
+  - “Start gates”: arming and cooldown remaining, plus current/required silence frames.
+- Counters
+  - Shows all diagnostics counters listed above; press “Refresh” to update.
+- Actions
+  - Refresh: Updates the summaries immediately.
+  - Reset counters: Calls `PipelineController.resetDiagnostics()`.
+  - Verbose pipeline logs (debug only): Toggles `setLoggingEnabled()` at runtime.
+  - Export snapshot (JSON): Shares a compact JSON with state, gates, and counters (no PII).
+  - Simulate wake (debug only): Calls `startListening()` and then `onWakeTriggered(0.99)` to exercise the CAPTURING path quickly.
+
+Debug detection
+
+- Both `PipelineController` and `DiagnosticsFragment` use reflection of `com.whispertflite.BuildConfig.DEBUG` to avoid build-time coupling to the app module in tests.
+- If reflection fails, debug-only UI and logging are treated as disabled.
+
+Troubleshooting
+
+- If unit tests complain about Android Log, ensure logging is disabled in tests via `setLoggingEnabled(false)` and use the fake clock constructor.
+- If the Diagnostics screen title shows a literal ampersand, ensure `&` is escaped as `&amp;` in XML.

@@ -25,6 +25,12 @@
             android:key="diag_refresh"
             android:title="Refresh" />
         <Preference
+            android:key="diag_export"
+            android:title="Export snapshot (JSON)" />
+        <Preference
+            android:key="diag_simulate_wake"
+            android:title="Simulate wake (debug only)" />
+        <Preference
             android:key="diag_reset"
             android:title="Reset counters" />
         <SwitchPreferenceCompat
