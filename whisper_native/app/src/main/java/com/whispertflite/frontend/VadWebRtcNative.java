@@ -45,13 +45,17 @@ public class VadWebRtcNative implements BasicVad {
     }
 
     @Override
-    public synchronized void setThreshold(float thr) { nativeSetThreshold(handle, thr); }
+    public synchronized void setThreshold(float thr) {
+        if (handle != 0) nativeSetThreshold(handle, thr);
+    }
     @Override
     public synchronized void setHangoverFrames(int frames) { try { edge.setHangoverFrames(Math.max(0, frames)); } catch (Throwable ignore) {} }
     @Override
     public synchronized void setStartAttackFrames(int frames) { try { edge.setAttackFrames(Math.max(1, frames)); } catch (Throwable ignore) {} }
 
-    public synchronized void setAggressiveness(int mode) { nativeSetMode(handle, mode); }
+    public synchronized void setAggressiveness(int mode) {
+        if (handle != 0) nativeSetMode(handle, mode);
+    }
 
     public synchronized void release() { if (handle != 0) { nativeRelease(handle); handle = 0; } }
 
