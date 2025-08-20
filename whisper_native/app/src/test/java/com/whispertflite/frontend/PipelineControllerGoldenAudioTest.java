@@ -157,4 +157,66 @@ public class PipelineControllerGoldenAudioTest {
         assertTrue("blockedCooldown increments", pc.getDiagBlockedCooldown() >= 1);
         assertEquals("still one capture started", 1, pc.getDiagCaptureStarted());
     }
+
+    @Test
+    public void lowRms_utterance_isDiscarded() {
+        final int frameSamples = 320;
+        FakeClock clk = new FakeClock(0);
+        SpyListener listener = new SpyListener();
+        PipelineController pc = new PipelineController(frameSamples, listener, clk);
+
+        pc.setMinArmDelayMs(0);
+        pc.setInterUtteranceCooldownMs(0);
+        pc.setRequiredSilenceFramesBeforeCapture(2);
+        pc.setPreRollFrames(1);
+        pc.setInCaptureSilenceFrames(0); // finalize on first silence
+        pc.setMinUtteranceFrames(3);     // ensure we don't hit tooShort first
+
+        pc.startSession();
+        float[] silence = new float[frameSamples];
+        float[] veryLow = new float[frameSamples];
+        for (int i = 0; i < frameSamples; i++) veryLow[i] = 0.0005f; // RMS well below 0.004
+
+        // Arm silence
+        pc.onFrame(silence, false);
+        pc.onFrame(silence, false);
+        // Rising edge + minimal speech frames to meet minUtteranceFrames
+        pc.onFrame(veryLow, true);
+        pc.onFrame(veryLow, true);
+        pc.onFrame(veryLow, true);
+        // Finalize with a silence frame
+        pc.onFrame(silence, false);
+
+        // Should discard due to low RMS
+        assertEquals(PipelineController.State.LISTENING, pc.getState());
+        assertNull("no utterance emitted", listener.lastUtterance);
+        assertTrue("discardLowRms increments", pc.getDiagDiscardLowRms() >= 1);
+        assertEquals("no emitted utterances", 0, pc.getDiagUtterancesEmitted());
+    }
+
+    @Test
+    public void wakeTriggered_noFrames_abort_after_grace() {
+        final int frameSamples = 320;
+        // Start clock sufficiently ahead so abort condition is met on first CAPTURING frame
+        FakeClock clk = new FakeClock(2000);
+        SpyListener listener = new SpyListener();
+        PipelineController pc = new PipelineController(frameSamples, listener, clk);
+
+        pc.setCaptureNoFramesAbortMs(500);
+        pc.setMinArmDelayMs(0);
+        pc.setInterUtteranceCooldownMs(0);
+
+        // Go to listening and trigger wake start (no frames appended yet)
+        pc.startListening();
+        pc.onWakeTriggered(0.9);
+        assertEquals(PipelineController.State.CAPTURING, pc.getState());
+
+        // First frame arrives after a long time with no frames captured -> abort
+        float[] silence = new float[frameSamples];
+        pc.onFrame(silence, false);
+
+        assertEquals("aborted back to LISTENING", PipelineController.State.LISTENING, pc.getState());
+        assertTrue("abortNoFrames increments", pc.getDiagAbortNoFrames() >= 1);
+        assertEquals("no utterances emitted", 0, pc.getDiagUtterancesEmitted());
+    }
 }
