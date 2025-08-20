@@ -146,6 +146,70 @@ public class PipelineAutoTuningTest {
         return collect(pc);
     }
 
+    private static Metrics runScenario_noiseBurstFalseTrigger(ParamSet p) {
+        int frameSamples = 320;
+        FakeClock clk = new FakeClock(0);
+        SpyListener listener = new SpyListener();
+        PipelineController pc = new PipelineController(frameSamples, listener, clk);
+        applyParams(pc, p);
+        pc.startSession();
+        float[] silence = new float[frameSamples];
+        float[] burst = new float[frameSamples];
+        for (int i=0;i<frameSamples;i++) burst[i]=0.03f;
+
+        // No required silence: try to provoke a too-short start & discard
+        for (int i=0;i<Math.max(0,p.requiredSilenceFrames-1);i++) pc.onFrame(silence,false);
+        pc.onFrame(burst,true); // rising edge
+        pc.onFrame(silence,false); // finalize quickly (merge window default may include 1)
+        return collect(pc);
+    }
+
+    private static Metrics runScenario_multiUtteranceConversation(ParamSet p) {
+        int frameSamples = 320;
+        FakeClock clk = new FakeClock(0);
+        SpyListener listener = new SpyListener();
+        PipelineController pc = new PipelineController(frameSamples, listener, clk);
+        applyParams(pc, p);
+        pc.startSession();
+        float[] silence = new float[frameSamples];
+        float[] speech = new float[frameSamples];
+        for (int i=0;i<frameSamples;i++) speech[i]=0.025f;
+
+        int turns = 3;
+        for (int t=0;t<turns;t++) {
+            for (int i=0;i<p.requiredSilenceFrames;i++) pc.onFrame(silence,false);
+            pc.onFrame(speech,true);
+            pc.onFrame(speech,true);
+            pc.onFrame(silence,false);
+            if (pc.getState()==PipelineController.State.TRANSCRIBING) pc.onTranscriptionComplete();
+            // advance time some but maybe within cooldown once to reward blocks
+            if (t==1) { clk.advance(Math.max(1, p.minArmDelayMs)); pc.onFrame(silence,false); pc.onFrame(speech,true); }
+        }
+        return collect(pc);
+    }
+
+    private static Metrics runScenario_outputGating(ParamSet p) {
+        int frameSamples = 320;
+        SpyListener listener = new SpyListener();
+        FakeClock clk = new FakeClock(0);
+        PipelineController pc = new PipelineController(frameSamples, listener, clk);
+        applyParams(pc, p);
+        pc.startSession();
+        float[] silence = new float[frameSamples];
+        float[] speech = new float[frameSamples];
+        for (int i=0;i<frameSamples;i++) speech[i]=0.03f;
+
+        pc.onOutputStart();
+        pc.onFrame(silence,false);
+        pc.onFrame(speech,true); // ignored while gated
+        pc.onOutputEnd();
+        for (int i=0;i<p.requiredSilenceFrames;i++) pc.onFrame(silence,false);
+        pc.onFrame(speech,true);
+        pc.onFrame(speech,true);
+        pc.onFrame(silence,false);
+        return collect(pc);
+    }
+
     private static Metrics collect(PipelineController pc) {
         Metrics m = new Metrics();
         m.blockedArming = pc.getDiagBlockedArming();
@@ -164,17 +228,26 @@ public class PipelineAutoTuningTest {
     private static int score(ParamSet p) {
         // Scenario 1: Normal utterance should emit 1, minimal penalties
         Metrics a = runScenario_normalUtterance(p);
-        int s1 = 100 * Math.min(1, (int)a.emitted) - 40*(int)a.discardTooShort - 40*(int)a.discardLowRms - 5*(int)(a.blockedArming + a.blockedCooldown + a.blockedSilence);
+        int s1 = 120 * Math.min(1, (int)a.emitted) - 40*(int)a.discardTooShort - 40*(int)a.discardLowRms - 5*(int)(a.blockedArming + a.blockedCooldown + a.blockedSilence);
         // Scenario 2: Cooldown block should register >=1 block
         Metrics b = runScenario_cooldownBlock(p);
-        int s2 = 30 * Math.min(1, (int)b.blockedCooldown) + 10 * Math.min(1, (int)b.captureStarted) - 20 * (int)b.emitted; // discourage emission on second attempt
+        int s2 = 40 * Math.min(1, (int)b.blockedCooldown) + 10 * Math.min(1, (int)b.captureStarted) - 20 * (int)b.emitted; // discourage emission on second attempt
         // Scenario 3: Low RMS should be discarded
         Metrics c = runScenario_lowRmsReject(p);
         int s3 = 60 * Math.min(1, (int)c.discardLowRms) - 50 * Math.min(1, (int)c.emitted);
         // Scenario 4: Required silence should block first, then allow one
         Metrics d = runScenario_requiredSilenceBlocks(p);
         int s4 = 40 * Math.min(1, (int)d.blockedSilence) + 40 * Math.min(1, (int)d.captureStarted) + 40 * Math.min(1, (int)d.emitted);
-        return s1 + s2 + s3 + s4;
+        // Scenario 5: Noise burst should not produce emissions; too-short/discard is acceptable but not preferred
+        Metrics e = runScenario_noiseBurstFalseTrigger(p);
+        int s5 = 20 * (e.emitted==0 ? 1 : 0) - 10 * Math.min(1, (int)e.discardTooShort);
+        // Scenario 6: Multi-utterance conversation should emit multiple but respect cooldown at least once
+        Metrics f = runScenario_multiUtteranceConversation(p);
+        int s6 = 30 * Math.min(1, (int)(f.captureStarted>=3 ? 1 : 0)) + 20 * Math.min(1, (int)(f.emitted>=3 ? 1 : 0)) + 10 * Math.min(1, (int)f.blockedCooldown);
+        // Scenario 7: Output gating should suppress barge-in while gated, then allow one
+        Metrics g = runScenario_outputGating(p);
+        int s7 = 30 * Math.min(1, (int)g.emitted) + 10 * (g.blockedArming+g.blockedCooldown+g.blockedSilence==0 ? 1 : 0);
+        return s1 + s2 + s3 + s4 + s5 + s6 + s7;
     }
 
     @Test
@@ -191,9 +264,11 @@ public class PipelineAutoTuningTest {
         long[] armMs = {0L, 100L, 300L};
         long[] cooldownMs = {400L, 800L};
 
-        Random rng = new Random(42);
-        List<ParamSet> candidates = new ArrayList<>();
-        for (int i=0;i<150;i++) { // random sample rather than full grid
+    int samples = Integer.getInteger("tune.samples", 200);
+    long seed = Long.getLong("tune.seed", 42L);
+    Random rng = new Random(seed);
+    List<ParamSet> candidates = new ArrayList<>();
+    for (int i=0;i<samples;i++) { // random sample rather than full grid
             ParamSet p = new ParamSet();
             p.preRollFrames = preRoll[rng.nextInt(preRoll.length)];
             p.inCaptureSilenceFrames = mergeWin[rng.nextInt(mergeWin.length)];
@@ -221,7 +296,7 @@ public class PipelineAutoTuningTest {
         }
 
         // Sanity: best score should be above a minimum baseline
-        assertTrue("Best score should exceed baseline", scored.get(0)[0] > 150);
+    assertTrue("Best score should exceed baseline", scored.get(0)[0] > 180);
 
         // Persist best config to build/auto_tune/best_config.json for easy import
         try {
