@@ -491,7 +491,7 @@ public class MainActivity extends AppCompatActivity {
             }
         });
         frameEmitter = new FrameEmitter(this);
-        pipelineController = new PipelineController(FrameEmitter.FRAME_SAMPLES, new PipelineController.Listener() {
+    pipelineController = new PipelineController(FrameEmitter.FRAME_SAMPLES, new PipelineController.Listener() {
             @Override public void onStateChanged(PipelineController.State state) {
                 Log.d(TAG, "Pipeline state=" + state);
                 handler.post(() -> tvStatus.setText(state.toString()));
@@ -521,6 +521,7 @@ public class MainActivity extends AppCompatActivity {
                 } catch (Exception e) { Log.d(TAG, "Failed to write wake capture wav: " + e.getMessage()); }
             }
         });
+    try { com.whispertflite.frontend.PipelineLocator.set(pipelineController); } catch (Throwable ignore) {}
         // adjust wakeword callback to notify pipeline
         try {
             wakewordDetector = new DtwWakewordDetector(this,

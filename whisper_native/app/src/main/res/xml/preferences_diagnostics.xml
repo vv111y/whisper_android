@@ -9,7 +9,7 @@
             android:summary="-" />
         <Preference
             android:key="diag_gates"
-            android:title="Start gates"
+            android:title="Start gates &amp; tunables"
             android:summary="-" />
     </PreferenceCategory>
 
@@ -37,6 +37,75 @@
             android:key="diag_verbose_logs"
             android:title="Verbose pipeline logs (debug only)"
             android:defaultValue="false" />
+    </PreferenceCategory>
+
+    <PreferenceCategory
+        android:key="diag_qt_category"
+        android:title="Quick tune (debug only)">
+        <SeekBarPreference
+            android:key="diag_qt_preRollFrames"
+            android:title="Pre-roll frames"
+            app:min="0"
+            android:max="50"
+            app:seekBarIncrement="1"
+            app:showSeekBarValue="true"
+            app:useSimpleSummaryProvider="true" />
+        <SeekBarPreference
+            android:key="diag_qt_mergeSilenceFrames"
+            android:title="Merge window (silence frames)"
+            app:min="0"
+            android:max="80"
+            app:seekBarIncrement="1"
+            app:showSeekBarValue="true"
+            app:useSimpleSummaryProvider="true" />
+        <SeekBarPreference
+            android:key="diag_qt_minArmMs"
+            android:title="Min arm delay (ms)"
+            app:min="0"
+            android:max="2000"
+            app:seekBarIncrement="50"
+            app:showSeekBarValue="true"
+            app:useSimpleSummaryProvider="true" />
+        <SeekBarPreference
+            android:key="diag_qt_cooldownMs"
+            android:title="Inter-utterance cooldown (ms)"
+            app:min="0"
+            android:max="3000"
+            app:seekBarIncrement="50"
+            app:showSeekBarValue="true"
+            app:useSimpleSummaryProvider="true" />
+        <SeekBarPreference
+            android:key="diag_qt_maxCaptureMs"
+            android:title="Max capture duration (ms)"
+            app:min="1000"
+            android:max="30000"
+            app:seekBarIncrement="250"
+            app:showSeekBarValue="true"
+            app:useSimpleSummaryProvider="true" />
+        <SeekBarPreference
+            android:key="diag_qt_minUtterFrames"
+            android:title="Min utterance frames"
+            app:min="1"
+            android:max="100"
+            app:seekBarIncrement="1"
+            app:showSeekBarValue="true"
+            app:useSimpleSummaryProvider="true" />
+        <SeekBarPreference
+            android:key="diag_qt_requiredSilenceFrames"
+            android:title="Required silence before start (frames)"
+            app:min="0"
+            android:max="30"
+            app:seekBarIncrement="1"
+            app:showSeekBarValue="true"
+            app:useSimpleSummaryProvider="true" />
+        <SeekBarPreference
+            android:key="diag_qt_noFramesAbortMs"
+            android:title="Abort if no frames (ms)"
+            app:min="200"
+            android:max="5000"
+            app:seekBarIncrement="50"
+            app:showSeekBarValue="true"
+            app:useSimpleSummaryProvider="true" />
     </PreferenceCategory>
 
 </PreferenceScreen>

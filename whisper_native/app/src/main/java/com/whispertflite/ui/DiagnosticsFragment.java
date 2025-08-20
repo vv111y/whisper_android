@@ -15,6 +15,15 @@ public class DiagnosticsFragment extends PreferenceFragmentCompat {
     private Preference refreshPref;
     private Preference exportPref;
     private Preference simulateWakePref;
+    private androidx.preference.PreferenceCategory quickTuneCategory;
+    private androidx.preference.SeekBarPreference qtPreRoll;
+    private androidx.preference.SeekBarPreference qtMergeSilence;
+    private androidx.preference.SeekBarPreference qtMinArm;
+    private androidx.preference.SeekBarPreference qtCooldown;
+    private androidx.preference.SeekBarPreference qtMaxCapture;
+    private androidx.preference.SeekBarPreference qtMinUtter;
+    private androidx.preference.SeekBarPreference qtReqSilence;
+    private androidx.preference.SeekBarPreference qtNoFramesAbort;
 
     @Override
     public void onCreatePreferences(Bundle savedInstanceState, String rootKey) {
@@ -22,23 +31,44 @@ public class DiagnosticsFragment extends PreferenceFragmentCompat {
         statePref = findPreference("diag_state");
         gatePref = findPreference("diag_gates");
         countersPref = findPreference("diag_counters");
-        logsPref = findPreference("diag_verbose_logs");
+    logsPref = findPreference("diag_verbose_logs");
     resetPref = findPreference("diag_reset");
-        refreshPref = findPreference("diag_refresh");
+    refreshPref = findPreference("diag_refresh");
     exportPref = findPreference("diag_export");
     simulateWakePref = findPreference("diag_simulate_wake");
+    quickTuneCategory = findPreference("diag_qt_category");
+    qtPreRoll = findPreference("diag_qt_preRollFrames");
+    qtMergeSilence = findPreference("diag_qt_mergeSilenceFrames");
+    qtMinArm = findPreference("diag_qt_minArmMs");
+    qtCooldown = findPreference("diag_qt_cooldownMs");
+    qtMaxCapture = findPreference("diag_qt_maxCaptureMs");
+    qtMinUtter = findPreference("diag_qt_minUtterFrames");
+    qtReqSilence = findPreference("diag_qt_requiredSilenceFrames");
+    qtNoFramesAbort = findPreference("diag_qt_noFramesAbortMs");
 
-    if (logsPref != null) logsPref.setVisible(isDebug());
-    if (simulateWakePref != null) simulateWakePref.setVisible(isDebug());
+        boolean dbg = isDebug();
+        if (logsPref != null) logsPref.setVisible(dbg);
+        if (simulateWakePref != null) simulateWakePref.setVisible(dbg);
+        // Hide quick tune sliders in release builds
+        if (!dbg) {
+            if (quickTuneCategory != null) quickTuneCategory.setVisible(false);
+            if (qtPreRoll != null) qtPreRoll.setVisible(false);
+            if (qtMergeSilence != null) qtMergeSilence.setVisible(false);
+            if (qtMinArm != null) qtMinArm.setVisible(false);
+            if (qtCooldown != null) qtCooldown.setVisible(false);
+            if (qtMaxCapture != null) qtMaxCapture.setVisible(false);
+            if (qtMinUtter != null) qtMinUtter.setVisible(false);
+            if (qtReqSilence != null) qtReqSilence.setVisible(false);
+            if (qtNoFramesAbort != null) qtNoFramesAbort.setVisible(false);
+        }
 
         if (resetPref != null) {
             resetPref.setOnPreferenceClickListener(p -> {
                 try {
-                    com.whispertflite.MainActivity act = (com.whispertflite.MainActivity) getActivity();
-                    if (act != null && act.getPipelineController() != null) {
-                        act.getPipelineController().resetDiagnostics();
-                        updateUi();
-                    }
+                    com.whispertflite.frontend.PipelineController pc = getPc();
+                    if (pc == null) return true;
+                    pc.resetDiagnostics();
+                    updateUi();
                 } catch (Throwable ignore) {}
                 return true;
             });
@@ -49,9 +79,9 @@ public class DiagnosticsFragment extends PreferenceFragmentCompat {
         if (exportPref != null) {
             exportPref.setOnPreferenceClickListener(p -> {
                 try {
-                    com.whispertflite.MainActivity act = (com.whispertflite.MainActivity) getActivity();
-                    if (act != null && act.getPipelineController() != null) {
-                        String json = buildSnapshotJson(act.getPipelineController());
+                        com.whispertflite.frontend.PipelineController pc = getPc();
+                        if (pc != null) {
+                            String json = buildSnapshotJson(pc);
                         android.content.Intent sendIntent = new android.content.Intent(android.content.Intent.ACTION_SEND);
                         sendIntent.setType("application/json");
                         sendIntent.putExtra(android.content.Intent.EXTRA_TEXT, json);
@@ -65,14 +95,11 @@ public class DiagnosticsFragment extends PreferenceFragmentCompat {
         if (simulateWakePref != null) {
             simulateWakePref.setOnPreferenceClickListener(p -> {
                 try {
-                    com.whispertflite.MainActivity act = (com.whispertflite.MainActivity) getActivity();
-                    if (act != null && act.getPipelineController() != null) {
-                        // simulate a wake trigger and start listening/capturing path
-                        com.whispertflite.frontend.PipelineController pc = act.getPipelineController();
-                        pc.startListening();
-                        pc.onWakeTriggered(0.99);
-                        updateUi();
-                    }
+                    com.whispertflite.frontend.PipelineController pc = getPc();
+                    if (pc == null) return true;
+                    pc.startListening();
+                    pc.onWakeTriggered(0.99);
+                    updateUi();
                 } catch (Throwable ignore) {}
                 return true;
             });
@@ -88,6 +115,8 @@ public class DiagnosticsFragment extends PreferenceFragmentCompat {
                 return true;
             });
         }
+    // Quick tune bindings (debug only)
+    bindQuickTune();
         updateUi();
     }
 
@@ -97,11 +126,30 @@ public class DiagnosticsFragment extends PreferenceFragmentCompat {
         updateUi();
     }
 
-    private void updateUi() {
+    @Override
+    public void onStart() {
+        super.onStart();
+        // In case PipelineController wiring finishes after onCreatePreferences
+        updateUi();
+        // Small delayed refresh to catch late init
+        try {
+            android.os.Handler h = new android.os.Handler(android.os.Looper.getMainLooper());
+            h.postDelayed(this::updateUi, 300);
+        } catch (Throwable ignore) {}
+    }
+
+    private com.whispertflite.frontend.PipelineController getPc() {
         try {
             com.whispertflite.MainActivity act = (com.whispertflite.MainActivity) getActivity();
-            if (act == null) return;
-            com.whispertflite.frontend.PipelineController pc = act.getPipelineController();
+            if (act != null && act.getPipelineController() != null) return act.getPipelineController();
+        } catch (Throwable ignore) {}
+        try { return com.whispertflite.frontend.PipelineLocator.get(); } catch (Throwable ignore) {}
+        return null;
+    }
+
+    private void updateUi() {
+        try {
+            com.whispertflite.frontend.PipelineController pc = getPc();
             if (pc == null) return;
 
             if (statePref != null) {
@@ -132,10 +180,47 @@ public class DiagnosticsFragment extends PreferenceFragmentCompat {
                 countersPref.setSummary(s);
             }
             if (logsPref != null) logsPref.setChecked(pc.isLoggingEnabled());
+            // Snap quick-tune sliders to current values
+            if (qtPreRoll != null) qtPreRoll.setValue(pc.getPreRollFrames());
+            if (qtMergeSilence != null) qtMergeSilence.setValue(pc.getInCaptureSilenceFrames());
+            if (qtMinArm != null) qtMinArm.setValue((int) pc.getMinArmDelayMs());
+            if (qtCooldown != null) qtCooldown.setValue((int) pc.getInterUtteranceCooldownMs());
+            if (qtMaxCapture != null) qtMaxCapture.setValue((int) pc.getMaxCaptureMs());
+            if (qtMinUtter != null) qtMinUtter.setValue(pc.getMinUtteranceFrames());
+            if (qtReqSilence != null) qtReqSilence.setValue(pc.getRequiredSilenceFramesBeforeCapture());
+            if (qtNoFramesAbort != null) qtNoFramesAbort.setValue((int) pc.getCaptureNoFramesAbortMs());
         } catch (Throwable ignore) {}
     }
 
+    private void bindQuickTune() {
+        try {
+            if (!isDebug()) return;
+            com.whispertflite.frontend.PipelineController pc = getPc();
+            if (pc == null) return;
+            if (qtPreRoll != null) qtPreRoll.setOnPreferenceChangeListener((p, v) -> { pc.setPreRollFrames(asInt(v)); updateUi(); return true; });
+            if (qtMergeSilence != null) qtMergeSilence.setOnPreferenceChangeListener((p, v) -> { pc.setInCaptureSilenceFrames(asInt(v)); updateUi(); return true; });
+            if (qtMinArm != null) qtMinArm.setOnPreferenceChangeListener((p, v) -> { pc.setMinArmDelayMs(asLong(v)); updateUi(); return true; });
+            if (qtCooldown != null) qtCooldown.setOnPreferenceChangeListener((p, v) -> { pc.setInterUtteranceCooldownMs(asLong(v)); updateUi(); return true; });
+            if (qtMaxCapture != null) qtMaxCapture.setOnPreferenceChangeListener((p, v) -> { pc.setMaxCaptureMs(asLong(v)); updateUi(); return true; });
+            if (qtMinUtter != null) qtMinUtter.setOnPreferenceChangeListener((p, v) -> { pc.setMinUtteranceFrames(asInt(v)); updateUi(); return true; });
+            if (qtReqSilence != null) qtReqSilence.setOnPreferenceChangeListener((p, v) -> { pc.setRequiredSilenceFramesBeforeCapture(asInt(v)); updateUi(); return true; });
+            if (qtNoFramesAbort != null) qtNoFramesAbort.setOnPreferenceChangeListener((p, v) -> { pc.setCaptureNoFramesAbortMs(asLong(v)); updateUi(); return true; });
+        } catch (Throwable ignore) {}
+    }
+
+    private int asInt(Object v) { try { return (v instanceof Integer) ? (Integer) v : Integer.parseInt(String.valueOf(v)); } catch (Throwable t) { return 0; } }
+    private long asLong(Object v) { try { return (v instanceof Integer) ? ((Integer) v).longValue() : Long.parseLong(String.valueOf(v)); } catch (Throwable t) { return 0L; } }
+
     private boolean isDebug() {
+        // Prefer robust runtime flag; fallback to BuildConfig reflection
+        try {
+            android.content.Context ctx = getContext();
+            if (ctx != null) {
+                int flags = ctx.getApplicationInfo().flags;
+                boolean dbg = (flags & android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0;
+                if (dbg) return true;
+            }
+        } catch (Throwable ignore) {}
         try {
             Class<?> c = Class.forName("com.whispertflite.BuildConfig");
             java.lang.reflect.Field f = c.getField("DEBUG");

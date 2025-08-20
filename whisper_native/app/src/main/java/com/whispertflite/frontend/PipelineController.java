@@ -337,6 +337,7 @@ public class PipelineController {
     public void setMaxCaptureMs(long ms) { this.maxCaptureMs = Math.max(1000L, ms); }
     public void setMinUtteranceFrames(int frames) { this.minUtteranceFrames = Math.max(1, frames); }
     public void setRequiredSilenceFramesBeforeCapture(int frames) { this.requiredSilenceFramesBeforeCapture = Math.max(0, frames); }
+    public void setCaptureNoFramesAbortMs(long ms) { this.captureNoFramesAbortMs = Math.max(0L, ms); }
 
     // Diagnostics accessors
     public int getPreRollFrames() { return preRollFrames; }
