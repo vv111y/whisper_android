@@ -2,6 +2,10 @@
 #include <cstdint>
 #include <cmath>
 #include <vector>
+#include <android/log.h>
+
+#define LOG_TAG "WebRtcVadJNI"
+#define LOGW(...) __android_log_print(ANDROID_LOG_WARN, LOG_TAG, __VA_ARGS__)
 
 #ifdef HAVE_WEBRTC_VAD
 // When vendored, the standalone WebRTC VAD exposes this header
@@ -46,6 +50,11 @@ static inline float compute_zcr(const int16_t* data, int len) {
         prev = v;
     }
     return (float)zc / (float)(len - 1);
+}
+
+static inline bool is_valid_frame_params(int sampleRate, int frameLen) {
+    if (sampleRate != 16000) return false;
+    return frameLen == 160 || frameLen == 320 || frameLen == 480; // 10/20/30ms at 16k
 }
 
 extern "C" {
@@ -120,14 +129,23 @@ Java_com_whispertflite_frontend_VadWebRtcNative_nativeProcess(JNIEnv* env, jclas
     env->GetShortArrayRegion(frame, 0, n, buf.data());
 #ifdef HAVE_WEBRTC_VAD
     if (!st->inst) return 0;
-    // WebRTC VAD expects 10/20/30ms windows; here frameLen is passed from Java (e.g., 320 @16k = 20ms)
+    // WebRTC VAD expects 10/20/30ms windows at 8/16/32k. We use 16k, 10/20/30ms (160/320/480).
+    static bool warned = false;
+    if (!is_valid_frame_params((int)sampleRate, (int)frameLen) && !warned) {
+        warned = true;
+        LOGW("Unexpected VAD params: sampleRate=%d, frameLen=%d (expected 16000 Hz, 160/320/480)", (int)sampleRate, (int)frameLen);
+    }
     int decision = WebRtcVad_Process(st->inst, (int)sampleRate, buf.data(), (size_t)frameLen);
     // WebRtcVad_Process returns 1 (speech), 0 (non-speech), -1 (error)
     if (decision < 0) return 0;
     return decision == 1 ? 1 : 0;
 #else
     // Optional: enforce typical VAD frame sizes (10/20/30ms). We accept any here.
-    (void)sampleRate; (void)frameLen;
+    static bool warned = false;
+    if (!is_valid_frame_params((int)sampleRate, (int)frameLen) && !warned) {
+        warned = true;
+        LOGW("Fallback VAD unexpected params: sampleRate=%d, frameLen=%d", (int)sampleRate, (int)frameLen);
+    }
     float rms = compute_rms(buf.data(), (int)n);
     float zcr = compute_zcr(buf.data(), (int)n);
     // Heuristic decision approximating a VAD: energy AND plausible ZCR window
@@ -135,6 +153,41 @@ Java_com_whispertflite_frontend_VadWebRtcNative_nativeProcess(JNIEnv* env, jclas
     const float zcrMax = 0.25f;
     bool speech = (rms >= st->threshold) && (zcr >= zcrMin && zcr <= zcrMax);
     return speech ? 1 : 0;
+#endif
+}
+
+JNIEXPORT jboolean JNICALL
+Java_com_whispertflite_frontend_VadWebRtcNative_nativeSelfTest(JNIEnv*, jclass) {
+#ifdef HAVE_WEBRTC_VAD
+    WebRtcVadInst* inst = WebRtcVad_Create();
+    if (!inst) return JNI_FALSE;
+    bool ok = WebRtcVad_Init(inst) == 0 && WebRtcVad_set_mode(inst, 2) == 0;
+    // prepare buffers
+    const int fs = 16000;
+    const int len = 320;
+    std::vector<int16_t> silence(len, 0);
+    std::vector<int16_t> tone(len);
+    for (int i = 0; i < len; ++i) tone[i] = (int16_t)std::round(std::sin(2 * M_PI * i / 20.0) * 3276.7); // ~0.1
+    if (ok) {
+        int d0 = WebRtcVad_Process(inst, fs, silence.data(), len);
+        int d1 = WebRtcVad_Process(inst, fs, tone.data(), len);
+        ok = (d0 == 0 || d0 == 1) && (d1 == 0 || d1 == 1);
+    }
+    WebRtcVad_Free(inst);
+    return ok ? JNI_TRUE : JNI_FALSE;
+#else
+    // Test fallback path: ensure computations run and return 0/1.
+    const int len = 320;
+    std::vector<int16_t> silence(len, 0);
+    std::vector<int16_t> tone(len);
+    for (int i = 0; i < len; ++i) tone[i] = (int16_t)std::round(std::sin(2 * M_PI * i / 20.0) * 3276.7);
+    float rms0 = compute_rms(silence.data(), len);
+    float zcr0 = compute_zcr(silence.data(), len);
+    float rms1 = compute_rms(tone.data(), len);
+    float zcr1 = compute_zcr(tone.data(), len);
+    // Basic sanity: silence rms lower than tone; zcr values in [0,1]
+    bool ok = (rms0 < rms1) && (zcr0 >= 0.f && zcr0 <= 1.f) && (zcr1 >= 0.f && zcr1 <= 1.f);
+    return ok ? JNI_TRUE : JNI_FALSE;
 #endif
 }
 

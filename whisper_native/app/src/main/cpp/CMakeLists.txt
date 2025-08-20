@@ -67,10 +67,12 @@ if (ANDROID)
     set_target_properties(tflite PROPERTIES IMPORTED_LOCATION
             ${CMAKE_CURRENT_LIST_DIR}/tf-lite-api/generated-libs/${ANDROID_ABI}/libtensorflowlite.so)
 
+        # Android system libs
+        find_library(log-lib log)
         if (VAD_LINK_LIB)
-                target_link_libraries(audioEngine tflite ${VAD_LINK_LIB})
+                target_link_libraries(audioEngine tflite ${VAD_LINK_LIB} ${log-lib})
         else()
-                target_link_libraries(audioEngine tflite)
+                target_link_libraries(audioEngine tflite ${log-lib})
         endif()
 endif ()
 

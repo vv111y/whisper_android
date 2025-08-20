@@ -16,6 +16,11 @@ import java.util.concurrent.atomic.AtomicReference;
 public class VadWebRtcNativeSmokeTest {
     @Test
     public void accept_emits_callbacks_and_stays_stable() {
+    // JNI self test should not crash and generally return true when native is present
+    boolean selfOk = false;
+    try { selfOk = VadWebRtcNative.selfTest(); } catch (Throwable ignore) {}
+    // Don't assert hard on selfOk: allow environments without vendored WebRTC
+
         AtomicInteger frames = new AtomicInteger();
         AtomicInteger starts = new AtomicInteger();
         AtomicInteger ends = new AtomicInteger();

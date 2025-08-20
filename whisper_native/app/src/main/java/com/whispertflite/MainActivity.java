@@ -119,6 +119,8 @@ public class MainActivity extends AppCompatActivity {
     private final long fallbackDelayMs = 1200; // wait for keys before fallback
     private final long inactivityTimeoutMs = 15_000; // stop fallback after idle
     private boolean normalizeBeforeTranscribe = true; // settings-driven
+    // Cadence monitor (debug-only usage)
+    private final com.whispertflite.frontend.CadenceMonitor vadCadence = new com.whispertflite.frontend.CadenceMonitor(200);
     // Post‑TTS action handling: after speaking, play ready beep then run action
     private enum PostTtsAction { NONE, START_RECORDING, START_SESSION_LISTENING }
     private PostTtsAction postTtsAction = PostTtsAction.NONE;
@@ -187,7 +189,7 @@ public class MainActivity extends AppCompatActivity {
             if (vadEnergy == null || !matchesPrefs(vadEnergy, cfg)) {
                 releaseCurrentVad();
 
-                vadEnergy = VadFactory.create(this, cfg, new com.whispertflite.frontend.BasicVad.Listener() {
+        vadEnergy = VadFactory.create(this, cfg, new com.whispertflite.frontend.BasicVad.Listener() {
                     @Override public void onSpeechStart() {
                         Log.d(TAG, "VAD speech start (" + cfg.engine + ")");
                         if (finalizeRunnable != null) handler.removeCallbacks(finalizeRunnable);
@@ -201,6 +203,7 @@ public class MainActivity extends AppCompatActivity {
                         handler.postDelayed(finalizeRunnable, finalizeDelayMs);
                     }
                     @Override public void onFrameAccepted(float[] frame, boolean speech) {
+            try { vadCadence.onCallback(android.os.SystemClock.uptimeMillis()); } catch (Throwable ignore) {}
                         if (pipelineController.getState() == com.whispertflite.frontend.PipelineController.State.LISTENING && speech && wakewordDetector != null)
                             wakewordDetector.acceptFrame(frame, true);
                         pipelineController.onFrame(frame, speech);

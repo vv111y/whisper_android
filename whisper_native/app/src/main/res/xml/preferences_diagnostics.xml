@@ -28,6 +28,13 @@
             android:key="diag_export"
             android:title="Export snapshot (JSON)" />
         <Preference
+            android:key="diag_cadence"
+            android:title="VAD callback cadence (debug only)"
+            android:summary="-" />
+        <Preference
+            android:key="diag_cadence_reset"
+            android:title="Reset cadence stats (debug only)" />
+        <Preference
             android:key="diag_session_check"
             android:title="Session self-check (debug only)"
             android:summary="Run a quick gating simulation without mic" />

@@ -65,4 +65,11 @@ public class VadWebRtcNative implements BasicVad {
     private static native int nativeProcess(long handle, short[] frame, int sampleRate, int frameLen);
     private static native void nativeSetMode(long handle, int mode);
     private static native void nativeSetThreshold(long handle, float thr);
+
+    // Self-test (sanity check JNI + underlying VAD); returns true on basic pass
+    public static native boolean nativeSelfTest();
+
+    public static boolean selfTest() {
+        try { return nativeSelfTest(); } catch (Throwable t) { return false; }
+    }
 }

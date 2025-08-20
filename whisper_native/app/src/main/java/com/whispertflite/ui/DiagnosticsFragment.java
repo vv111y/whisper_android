@@ -16,6 +16,8 @@ public class DiagnosticsFragment extends PreferenceFragmentCompat {
     private Preference exportPref;
     private Preference simulateWakePref;
     private Preference sessionCheckPref;
+    private Preference cadencePref;
+    private Preference cadenceResetPref;
     private androidx.preference.PreferenceCategory quickTuneCategory;
     private androidx.preference.SeekBarPreference qtPreRoll;
     private androidx.preference.SeekBarPreference qtMergeSilence;
@@ -38,6 +40,8 @@ public class DiagnosticsFragment extends PreferenceFragmentCompat {
     exportPref = findPreference("diag_export");
     simulateWakePref = findPreference("diag_simulate_wake");
     sessionCheckPref = findPreference("diag_session_check");
+    cadencePref = findPreference("diag_cadence");
+    cadenceResetPref = findPreference("diag_cadence_reset");
     quickTuneCategory = findPreference("diag_qt_category");
     qtPreRoll = findPreference("diag_qt_preRollFrames");
     qtMergeSilence = findPreference("diag_qt_mergeSilenceFrames");
@@ -49,9 +53,11 @@ public class DiagnosticsFragment extends PreferenceFragmentCompat {
     qtNoFramesAbort = findPreference("diag_qt_noFramesAbortMs");
 
         boolean dbg = isDebug();
-        if (logsPref != null) logsPref.setVisible(dbg);
+    if (logsPref != null) logsPref.setVisible(dbg);
         if (simulateWakePref != null) simulateWakePref.setVisible(dbg);
     if (sessionCheckPref != null) sessionCheckPref.setVisible(dbg);
+    if (cadencePref != null) cadencePref.setVisible(dbg);
+    if (cadenceResetPref != null) cadenceResetPref.setVisible(dbg);
         // Hide quick tune sliders in release builds
         if (!dbg) {
             if (quickTuneCategory != null) quickTuneCategory.setVisible(false);
@@ -92,6 +98,23 @@ public class DiagnosticsFragment extends PreferenceFragmentCompat {
                         startActivity(shareIntent);
                     }
                 } catch (Throwable ignore) {}
+                return true;
+            });
+        }
+        if (cadenceResetPref != null) {
+            cadenceResetPref.setOnPreferenceClickListener(p -> {
+                try {
+                    com.whispertflite.MainActivity act = (com.whispertflite.MainActivity) getActivity();
+                    if (act != null) {
+                        java.lang.reflect.Field f = com.whispertflite.MainActivity.class.getDeclaredField("vadCadence");
+                        f.setAccessible(true);
+                        Object cm = f.get(act);
+                        if (cm instanceof com.whispertflite.frontend.CadenceMonitor) {
+                            ((com.whispertflite.frontend.CadenceMonitor) cm).reset();
+                        }
+                    }
+                } catch (Throwable ignore) {}
+                updateUi();
                 return true;
             });
         }
@@ -189,6 +212,7 @@ public class DiagnosticsFragment extends PreferenceFragmentCompat {
                 countersPref.setSummary(s);
             }
             if (logsPref != null) logsPref.setChecked(pc.isLoggingEnabled());
+            if (cadencePref != null) cadencePref.setSummary(getCadenceSummary());
             // Snap quick-tune sliders to current values
             if (qtPreRoll != null) qtPreRoll.setValue(pc.getPreRollFrames());
             if (qtMergeSilence != null) qtMergeSilence.setValue(pc.getInCaptureSilenceFrames());
@@ -199,6 +223,22 @@ public class DiagnosticsFragment extends PreferenceFragmentCompat {
             if (qtReqSilence != null) qtReqSilence.setValue(pc.getRequiredSilenceFramesBeforeCapture());
             if (qtNoFramesAbort != null) qtNoFramesAbort.setValue((int) pc.getCaptureNoFramesAbortMs());
         } catch (Throwable ignore) {}
+    }
+
+    private String getCadenceSummary() {
+        if (!isDebug()) return "-";
+        try {
+            com.whispertflite.MainActivity act = (com.whispertflite.MainActivity) getActivity();
+            if (act != null) {
+                java.lang.reflect.Field f = com.whispertflite.MainActivity.class.getDeclaredField("vadCadence");
+                f.setAccessible(true);
+                Object cm = f.get(act);
+                if (cm instanceof com.whispertflite.frontend.CadenceMonitor) {
+                    return ((com.whispertflite.frontend.CadenceMonitor) cm).summary();
+                }
+            }
+        } catch (Throwable ignore) {}
+        return "-";
     }
 
     private void bindQuickTune() {
