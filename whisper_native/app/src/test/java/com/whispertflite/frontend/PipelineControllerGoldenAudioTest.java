@@ -408,4 +408,66 @@ public class PipelineControllerGoldenAudioTest {
         }
         assertTrue("second utterance starts with pre-roll silence", preAllZero);
     }
+
+    @Test
+    public void counters_histogram_across_multiple_reasons() {
+        final int frameSamples = 320;
+        FakeClock clk = new FakeClock(0);
+        SpyListener listener = new SpyListener();
+        PipelineController pc = new PipelineController(frameSamples, listener, clk);
+
+        // Deterministic gates
+        pc.setPreRollFrames(2);
+        pc.setInCaptureSilenceFrames(0); // finalize on first silence
+        pc.setMinUtteranceFrames(2);
+        pc.setInterUtteranceCooldownMs(800);
+        pc.setMinArmDelayMs(500);
+        pc.setRequiredSilenceFramesBeforeCapture(3);
+
+        pc.startSession();
+        float[] silence = new float[frameSamples];
+        float[] speech = new float[frameSamples];
+        for (int i = 0; i < frameSamples; i++) speech[i] = 0.02f;
+
+        // 1) Two attempts blocked by arming
+        pc.onFrame(speech, true);           // attempt 1 -> arming block
+        assertEquals(PipelineController.State.LISTENING, pc.getState());
+        pc.onFrame(silence, false);         // reset rising edge
+        clk.advance(100);
+        pc.onFrame(speech, true);           // attempt 2 -> still arming block
+        assertEquals(PipelineController.State.LISTENING, pc.getState());
+        pc.onFrame(silence, false);
+
+    // 2) Clear arming, but block on insufficient silence
+    clk.advance(400); // total 500ms elapsed -> arming satisfied
+    // Do not add extra silence here; we currently have < required 3
+    pc.onFrame(speech, true);   // attempt -> blocked by required silence (need 3)
+        assertEquals(PipelineController.State.LISTENING, pc.getState());
+
+        // 3) Meet silence requirement and emit a short valid utterance
+        pc.onFrame(silence, false);
+        pc.onFrame(silence, false);
+        pc.onFrame(silence, false); // now >= 3 consecutive
+        pc.onFrame(speech, true);
+        pc.onFrame(speech, true);
+        pc.onFrame(silence, false); // finalize quick (merge window 0)
+        assertEquals(PipelineController.State.TRANSCRIBING, pc.getState());
+        assertNotNull(listener.lastUtterance);
+        pc.onTranscriptionComplete();
+
+    // 4) Attempt within cooldown; ensure arming is not the blocker
+    clk.advance(600); // > minArmDelay (500) but < cooldown (800)
+        pc.onFrame(silence, false);
+        pc.onFrame(speech, true);
+        assertEquals(PipelineController.State.LISTENING, pc.getState());
+
+        // Histogram assertions: exact counts
+        assertEquals("blocked arming count", 2, pc.getDiagBlockedArming());
+        assertEquals("blocked silence count", 1, pc.getDiagBlockedSilence());
+        assertEquals("blocked cooldown count", 1, pc.getDiagBlockedCooldown());
+        assertEquals("captures started", 1, pc.getDiagCaptureStarted());
+        assertEquals("utterances emitted", 1, pc.getDiagUtterancesEmitted());
+        // Optional finalize counters should be at least 1 for silence-exceeded path
+        assertTrue(pc.getDiagFinalizeSilenceExceeded() >= 1);
+    }
 }
