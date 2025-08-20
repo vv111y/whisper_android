@@ -1,0 +1,160 @@
+package com.whispertflite.frontend;
+
+import org.junit.Test;
+import static org.junit.Assert.*;
+
+/**
+ * Golden-audio style offline regression: synthesize frames and validate
+ * rising-edge start with pre-roll and finalize after merge window.
+ */
+public class PipelineControllerGoldenAudioTest {
+    private static class FakeClock implements PipelineController.Clock {
+        long t;
+        FakeClock(long start) { this.t = start; }
+        @Override public long now() { return t; }
+        void advance(long ms) { t += ms; }
+    }
+
+    private static class SpyListener implements PipelineController.Listener {
+        volatile PipelineController.State lastState;
+        volatile double lastWakeScore;
+        volatile float[] lastUtterance;
+        @Override public void onStateChanged(PipelineController.State state) { lastState = state; }
+        @Override public void onWakeTriggered(double score) { lastWakeScore = score; }
+        @Override public void onUtteranceReady(float[] samples) { lastUtterance = samples; }
+    }
+
+    @Test
+    public void session_risingEdge_preRoll_and_mergeWindow_finalize() {
+        final int frameSamples = 320;
+        FakeClock clk = new FakeClock(0);
+        SpyListener listener = new SpyListener();
+        PipelineController pc = new PipelineController(frameSamples, listener, clk);
+
+        // Deterministic tunables
+        pc.setMinArmDelayMs(0);
+        pc.setInterUtteranceCooldownMs(0);
+        pc.setRequiredSilenceFramesBeforeCapture(3);
+        pc.setPreRollFrames(5);
+        pc.setInCaptureSilenceFrames(3);
+        pc.setMinUtteranceFrames(4);
+        pc.setMaxCaptureMs(60_000);
+        pc.setCaptureNoFramesAbortMs(10_000);
+
+        // Start SESSION mode to use rising-edge semantics
+        pc.startSession();
+
+        // Build frames
+        float[] silence = new float[frameSamples];
+        float[] speech = new float[frameSamples];
+        for (int i = 0; i < frameSamples; i++) {
+            // small amplitude tone-like
+            speech[i] = (float) (0.02 * Math.sin(2 * Math.PI * i / 20.0));
+        }
+
+        // Feed required pre-speech silence (LISTENING)
+        for (int i = 0; i < 3; i++) {
+            pc.onFrame(silence, false);
+        }
+        // Accumulate pre-roll frames (these should be included on start)
+        for (int i = 0; i < 5; i++) {
+            pc.onFrame(silence, false);
+        }
+        // Rising edge: speech=true should start capture and copy pre-roll
+        pc.onFrame(speech, true);
+
+        assertEquals("CAPTURING after rising edge", PipelineController.State.CAPTURING, pc.getState());
+        assertTrue("diagCaptureStarted increments", pc.getDiagCaptureStarted() >= 1);
+
+        // Provide enough speech frames to exceed min utter threshold
+        for (int i = 0; i < 6; i++) pc.onFrame(speech, true);
+
+        // Provide silence to exceed merge window and force finalize
+        for (int i = 0; i < pc.getInCaptureSilenceFrames() + 1; i++) pc.onFrame(silence, false);
+
+        // Finalization path sets state to TRANSCRIBING and invokes listener
+        assertEquals(PipelineController.State.TRANSCRIBING, pc.getState());
+        assertNotNull("utterance emitted", listener.lastUtterance);
+        assertTrue("finalizeSilenceExceeded increments", pc.getDiagFinalizeSilenceExceeded() >= 1);
+        assertEquals("utterancesEmitted increments", 1, pc.getDiagUtterancesEmitted());
+
+        // Expect utterance length to include pre-roll + speech + a few silence frames
+        int minExpectedFrames = 5 /*pre-roll*/ + 1 /*first speech*/ + 6 /*extra speech*/ + 1 /*at least one silent frame kept*/;
+        int minSamples = minExpectedFrames * frameSamples;
+        assertTrue("utterance length includes pre-roll and content", listener.lastUtterance.length >= minSamples);
+    }
+
+    @Test
+    public void tooShortUtterance_isDiscarded() {
+        final int frameSamples = 320;
+        FakeClock clk = new FakeClock(0);
+        SpyListener listener = new SpyListener();
+        PipelineController pc = new PipelineController(frameSamples, listener, clk);
+
+    pc.setMinArmDelayMs(0);
+    pc.setInterUtteranceCooldownMs(0);
+    pc.setRequiredSilenceFramesBeforeCapture(0);
+    pc.setPreRollFrames(0);
+    pc.setInCaptureSilenceFrames(0); // immediate finalize on first silent frame
+    pc.setMinUtteranceFrames(4); // require more than we will provide
+
+        pc.startSession();
+        float[] silence = new float[frameSamples];
+        float[] tinySpeech = new float[frameSamples];
+        for (int i = 0; i < frameSamples; i++) tinySpeech[i] = 0.01f; // above RMS floor but we'll keep count short
+
+    // Rising edge: a single speech frame, then silence should finalize immediately
+    pc.onFrame(tinySpeech, true);
+    pc.onFrame(silence, false);
+
+        // Should be discarded as too short
+        assertEquals("back to LISTENING after discard", PipelineController.State.LISTENING, pc.getState());
+        assertNull("no utterance emitted", listener.lastUtterance);
+        assertTrue("discardTooShort increments", pc.getDiagDiscardTooShort() >= 1);
+        assertEquals("no emitted utterances", 0, pc.getDiagUtterancesEmitted());
+    }
+
+    @Test
+    public void cooldown_blocks_immediate_retrigger() {
+        final int frameSamples = 320;
+        FakeClock clk = new FakeClock(0);
+        SpyListener listener = new SpyListener();
+        PipelineController pc = new PipelineController(frameSamples, listener, clk);
+
+        pc.setMinArmDelayMs(0);
+        pc.setInterUtteranceCooldownMs(1000); // 1s cooldown
+        pc.setRequiredSilenceFramesBeforeCapture(2);
+        pc.setPreRollFrames(2);
+        pc.setInCaptureSilenceFrames(2);
+        pc.setMinUtteranceFrames(3);
+
+        pc.startSession();
+        float[] silence = new float[frameSamples];
+        float[] speech = new float[frameSamples];
+        for (int i = 0; i < frameSamples; i++) speech[i] = 0.02f;
+
+        // First utterance
+        pc.onFrame(silence, false);
+        pc.onFrame(silence, false);
+        pc.onFrame(speech, true);
+        pc.onFrame(speech, true);
+        pc.onFrame(speech, true);
+        pc.onFrame(silence, false);
+        pc.onFrame(silence, false);
+        pc.onFrame(silence, false); // finalize via merge window
+    assertEquals(PipelineController.State.TRANSCRIBING, pc.getState());
+    assertEquals(1, pc.getDiagUtterancesEmitted());
+    // Simulate transcription completion to return to LISTENING and set cooldown start
+    pc.onTranscriptionComplete();
+
+        // Immediately attempt another start within cooldown
+        // No time advance -> now - lastCaptureEndUptimeMs == 0 < 1000
+    pc.onFrame(silence, false); // listening pre-frame
+        pc.onFrame(speech, true);   // rising edge attempt
+
+        // Should be blocked by cooldown; state remains LISTENING
+        assertEquals(PipelineController.State.LISTENING, pc.getState());
+        assertTrue("blockedCooldown increments", pc.getDiagBlockedCooldown() >= 1);
+        assertEquals("still one capture started", 1, pc.getDiagCaptureStarted());
+    }
+}

@@ -16,3 +16,16 @@ buildscript {
 //    id 'com.android.application' version '8.0.2' apply false
 //    id 'com.android.library' version '8.0.2' apply false
 //}
+
+// Convenience aliases for local CI runs
+tasks.register("localCi") {
+    group = "verification"
+    description = "Assemble debug, run unit tests and lint (no device required)."
+    dependsOn(":app:assembleDebug", ":app:testDebugUnitTest", ":app:lintDebug")
+}
+
+tasks.register("localCiConnected") {
+    group = "verification"
+    description = "Run connected Android tests on a device/emulator (screen must be awake)."
+    dependsOn(":app:connectedDebugAndroidTest")
+}

@@ -64,6 +64,19 @@
         <Preference
             android:key="diag_preset_noisy"
             android:title="Apply preset: Noisy cafe" />
+        <Preference
+            android:key="diag_preset_save_custom"
+            android:title="Save current as Custom" />
+        <Preference
+            android:key="diag_preset_apply_custom"
+            android:title="Apply preset: Custom"
+            android:summary="Uses your saved custom values" />
+        <Preference
+            android:key="diag_preset_clear_custom"
+            android:title="Clear Custom preset" />
+        <Preference
+            android:key="diag_preset_reset"
+            android:title="Reset to defaults" />
     </PreferenceCategory>
 
     <PreferenceCategory

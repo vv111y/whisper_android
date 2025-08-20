@@ -22,6 +22,10 @@ public class DiagnosticsFragment extends PreferenceFragmentCompat {
     private Preference presetDefaultPref;
     private Preference presetQuietPref;
     private Preference presetNoisyPref;
+    private Preference presetResetPref;
+    private Preference presetSaveCustomPref;
+    private Preference presetApplyCustomPref;
+    private Preference presetClearCustomPref;
     private androidx.preference.PreferenceCategory quickTuneCategory;
     private androidx.preference.SeekBarPreference qtPreRoll;
     private androidx.preference.SeekBarPreference qtMergeSilence;
@@ -50,6 +54,10 @@ public class DiagnosticsFragment extends PreferenceFragmentCompat {
     presetDefaultPref = findPreference("diag_preset_default");
     presetQuietPref = findPreference("diag_preset_quiet");
     presetNoisyPref = findPreference("diag_preset_noisy");
+    presetResetPref = findPreference("diag_preset_reset");
+    presetSaveCustomPref = findPreference("diag_preset_save_custom");
+    presetApplyCustomPref = findPreference("diag_preset_apply_custom");
+    presetClearCustomPref = findPreference("diag_preset_clear_custom");
     quickTuneCategory = findPreference("diag_qt_category");
     qtPreRoll = findPreference("diag_qt_preRollFrames");
     qtMergeSilence = findPreference("diag_qt_mergeSilenceFrames");
@@ -160,6 +168,10 @@ public class DiagnosticsFragment extends PreferenceFragmentCompat {
     if (presetDefaultPref != null) presetDefaultPref.setOnPreferenceClickListener(p -> { applyPreset("default"); return true; });
     if (presetQuietPref != null) presetQuietPref.setOnPreferenceClickListener(p -> { applyPreset("quiet"); return true; });
     if (presetNoisyPref != null) presetNoisyPref.setOnPreferenceClickListener(p -> { applyPreset("noisy"); return true; });
+    if (presetResetPref != null) presetResetPref.setOnPreferenceClickListener(p -> { applyPreset("default"); return true; });
+    if (presetSaveCustomPref != null) presetSaveCustomPref.setOnPreferenceClickListener(p -> { saveCustomFromCurrent(); return true; });
+    if (presetApplyCustomPref != null) presetApplyCustomPref.setOnPreferenceClickListener(p -> { applyPreset("custom"); return true; });
+    if (presetClearCustomPref != null) presetClearCustomPref.setOnPreferenceClickListener(p -> { clearCustomPreset(); return true; });
         if (logsPref != null) {
             logsPref.setOnPreferenceChangeListener((p, newVal) -> {
                 try {
@@ -220,6 +232,8 @@ public class DiagnosticsFragment extends PreferenceFragmentCompat {
             "Tunables: preRoll=" + pc.getPreRollFrames() + ", mergeSilenceFrames=" + pc.getInCaptureSilenceFrames() + "\n" +
             "  minArmMs=" + pc.getMinArmDelayMs() + ", cooldownMs=" + pc.getInterUtteranceCooldownMs() + ", maxCaptureMs=" + pc.getMaxCaptureMs() + "\n" +
             "  minUtterFrames=" + pc.getMinUtteranceFrames() + ", noFramesAbortMs=" + pc.getCaptureNoFramesAbortMs() + ", frameSamples=" + pc.getFrameSamples();
+                String preset = getLastPreset();
+                if (preset != null && !preset.isEmpty()) s += "\nPreset: " + preset;
                 gatePref.setSummary(s);
             }
             if (countersPref != null) {
@@ -312,10 +326,89 @@ public class DiagnosticsFragment extends PreferenceFragmentCompat {
                 pc.setMinUtteranceFrames(28);
                 pc.setRequiredSilenceFramesBeforeCapture(8);
                 pc.setCaptureNoFramesAbortMs(1500);
+            } else if ("custom".equals(which)) {
+                if (!applyCustomTo(pc)) {
+                    try { android.widget.Toast.makeText(getContext(), "No Custom preset saved", android.widget.Toast.LENGTH_SHORT).show(); } catch (Throwable ignore) {}
+                    return;
+                }
             }
+            saveLastPreset(which);
             updateUi();
             try { android.widget.Toast.makeText(getContext(), "Preset applied: " + which, android.widget.Toast.LENGTH_SHORT).show(); } catch (Throwable ignore) {}
         } catch (Throwable ignore) {}
+    }
+
+    private void saveCustomFromCurrent() {
+        try {
+            com.whispertflite.frontend.PipelineController pc = getPc();
+            if (pc == null) return;
+            android.content.Context ctx = getContext(); if (ctx == null) return;
+            androidx.preference.PreferenceManager.getDefaultSharedPreferences(ctx).edit()
+                .putInt("diag_custom_preRoll", pc.getPreRollFrames())
+                .putInt("diag_custom_mergeSilence", pc.getInCaptureSilenceFrames())
+                .putLong("diag_custom_minArm", pc.getMinArmDelayMs())
+                .putLong("diag_custom_cooldown", pc.getInterUtteranceCooldownMs())
+                .putLong("diag_custom_maxCapture", pc.getMaxCaptureMs())
+                .putInt("diag_custom_minUtter", pc.getMinUtteranceFrames())
+                .putInt("diag_custom_reqSilence", pc.getRequiredSilenceFramesBeforeCapture())
+                .putLong("diag_custom_noFramesAbort", pc.getCaptureNoFramesAbortMs())
+                .apply();
+            saveLastPreset("custom");
+            updateUi();
+            try { android.widget.Toast.makeText(getContext(), "Saved Custom preset", android.widget.Toast.LENGTH_SHORT).show(); } catch (Throwable ignore) {}
+        } catch (Throwable ignore) {}
+    }
+
+    private boolean applyCustomTo(com.whispertflite.frontend.PipelineController pc) {
+        try {
+            android.content.Context ctx = getContext(); if (ctx == null) return false;
+            android.content.SharedPreferences sp = androidx.preference.PreferenceManager.getDefaultSharedPreferences(ctx);
+            if (!sp.contains("diag_custom_preRoll")) return false;
+            pc.setPreRollFrames(sp.getInt("diag_custom_preRoll", pc.getPreRollFrames()));
+            pc.setInCaptureSilenceFrames(sp.getInt("diag_custom_mergeSilence", pc.getInCaptureSilenceFrames()));
+            pc.setMinArmDelayMs(sp.getLong("diag_custom_minArm", pc.getMinArmDelayMs()));
+            pc.setInterUtteranceCooldownMs(sp.getLong("diag_custom_cooldown", pc.getInterUtteranceCooldownMs()));
+            pc.setMaxCaptureMs(sp.getLong("diag_custom_maxCapture", pc.getMaxCaptureMs()));
+            pc.setMinUtteranceFrames(sp.getInt("diag_custom_minUtter", pc.getMinUtteranceFrames()));
+            pc.setRequiredSilenceFramesBeforeCapture(sp.getInt("diag_custom_reqSilence", pc.getRequiredSilenceFramesBeforeCapture()));
+            pc.setCaptureNoFramesAbortMs(sp.getLong("diag_custom_noFramesAbort", pc.getCaptureNoFramesAbortMs()));
+            return true;
+        } catch (Throwable ignore) {
+            return false;
+        }
+    }
+
+    private void clearCustomPreset() {
+        try {
+            android.content.Context ctx = getContext(); if (ctx == null) return;
+            androidx.preference.PreferenceManager.getDefaultSharedPreferences(ctx).edit()
+                .remove("diag_custom_preRoll")
+                .remove("diag_custom_mergeSilence")
+                .remove("diag_custom_minArm")
+                .remove("diag_custom_cooldown")
+                .remove("diag_custom_maxCapture")
+                .remove("diag_custom_minUtter")
+                .remove("diag_custom_reqSilence")
+                .remove("diag_custom_noFramesAbort")
+                .apply();
+            try { android.widget.Toast.makeText(getContext(), "Cleared Custom preset", android.widget.Toast.LENGTH_SHORT).show(); } catch (Throwable ignore) {}
+        } catch (Throwable ignore) {}
+    }
+
+    private void saveLastPreset(String which) {
+        try {
+            android.content.Context ctx = getContext(); if (ctx == null) return;
+            androidx.preference.PreferenceManager.getDefaultSharedPreferences(ctx)
+                .edit().putString("diag_last_preset", which).apply();
+        } catch (Throwable ignore) {}
+    }
+
+    private String getLastPreset() {
+        try {
+            android.content.Context ctx = getContext(); if (ctx == null) return null;
+            return androidx.preference.PreferenceManager.getDefaultSharedPreferences(ctx)
+                .getString("diag_last_preset", "");
+        } catch (Throwable ignore) { return null; }
     }
 
     private int asInt(Object v) { try { return (v instanceof Integer) ? (Integer) v : Integer.parseInt(String.valueOf(v)); } catch (Throwable t) { return 0; } }
@@ -346,6 +439,13 @@ public class DiagnosticsFragment extends PreferenceFragmentCompat {
         sb.append('{');
         // Version & build/device info
         sb.append("\"version\":1,");
+        // Snapshot timestamps
+        try {
+            long epoch = java.lang.System.currentTimeMillis();
+            long uptime = android.os.SystemClock.uptimeMillis();
+            sb.append("\"snapshotEpochMs\":" ).append(epoch).append(',');
+            sb.append("\"snapshotUptimeMs\":").append(uptime).append(',');
+        } catch (Throwable ignore) {}
         try {
             android.content.Context ctx = getContext();
             if (ctx != null) {
@@ -366,6 +466,7 @@ public class DiagnosticsFragment extends PreferenceFragmentCompat {
         sb.append("\"mode\":\"").append(pc.getMode()).append("\",");
         sb.append("\"inputGated\":").append(pc.isInputGated()).append(',');
         sb.append("\"loggingEnabled\":").append(pc.isLoggingEnabled()).append(',');
+        try { String preset = getLastPreset(); if (preset != null && !preset.isEmpty()) { sb.append("\"preset\":\"").append(escape(preset)).append("\","); } } catch (Throwable ignore) {}
         sb.append("\"armingRemainingMs\":").append(pc.getArmingRemainingMs()).append(',');
         sb.append("\"cooldownRemainingMs\":").append(pc.getCooldownRemainingMs()).append(',');
         sb.append("\"silence\":{");
