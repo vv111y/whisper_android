@@ -165,6 +165,13 @@
             android:summary="Increase for multi-sentence chat (up to 120s)" />
     </PreferenceCategory>
 
+    <PreferenceCategory android:title="Diagnostics">
+        <Preference
+            android:key="pref_open_diagnostics"
+            android:title="Open diagnostics"
+            android:summary="View pipeline state, gates, and counters" />
+    </PreferenceCategory>
+
     <com.whispertflite.ui.pref.DualButtonsPreference
         android:key="pref_dual_bottom" />
 

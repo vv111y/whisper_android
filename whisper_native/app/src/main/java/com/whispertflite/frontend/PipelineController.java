@@ -355,4 +355,21 @@ public class PipelineController {
     public long getDiagDiscardTooShort() { return diagDiscardTooShort; }
     public long getDiagDiscardLowRms() { return diagDiscardLowRms; }
     public long getDiagUtterancesEmitted() { return diagUtterancesEmitted; }
+
+    // Diagnostics helpers
+    public boolean isLoggingEnabled() { return loggingEnabled; }
+    public long getArmingRemainingMs() {
+        long now = clock.now();
+        long elapsed = now - listeningArmedAtUptimeMs;
+        long rem = minArmDelayMs - Math.max(0L, elapsed);
+        return Math.max(0L, rem);
+    }
+    public long getCooldownRemainingMs() {
+        long now = clock.now();
+        long elapsed = now - lastCaptureEndUptimeMs;
+        long rem = interUtteranceCooldownMs - Math.max(0L, elapsed);
+        return Math.max(0L, rem);
+    }
+    public int getListeningSilenceFrames() { return listeningSilenceFrames; }
+    public int getRequiredSilenceFramesBeforeCapture() { return requiredSilenceFramesBeforeCapture; }
 }

@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<PreferenceScreen xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto">
+
+    <PreferenceCategory android:title="Pipeline status">
+        <Preference
+            android:key="diag_state"
+            android:title="State &amp; input gate"
+            android:summary="-" />
+        <Preference
+            android:key="diag_gates"
+            android:title="Start gates"
+            android:summary="-" />
+    </PreferenceCategory>
+
+    <PreferenceCategory android:title="Counters">
+        <Preference
+            android:key="diag_counters"
+            android:title="Counters"
+            android:summary="-" />
+    </PreferenceCategory>
+
+    <PreferenceCategory android:title="Actions">
+        <Preference
+            android:key="diag_refresh"
+            android:title="Refresh" />
+        <Preference
+            android:key="diag_reset"
+            android:title="Reset counters" />
+        <SwitchPreferenceCompat
+            android:key="diag_verbose_logs"
+            android:title="Verbose pipeline logs (debug only)"
+            android:defaultValue="false" />
+    </PreferenceCategory>
+
+</PreferenceScreen>

@@ -51,6 +51,7 @@ public class SettingsFragment extends PreferenceFragmentCompat {
         // Populate model list from app's external files dir
         ListPreference modelList = findPreference("pref_model_file");
         Preference validatePref = findPreference("pref_validate_model");
+    Preference openDiag = findPreference("pref_open_diagnostics");
     if (modelList != null) {
             try {
                 android.content.Context ctx = requireContext();
@@ -139,6 +140,18 @@ public class SettingsFragment extends PreferenceFragmentCompat {
                 } catch (Throwable t) {
                     showDialog("Model Validation", "Validation error: " + t.getMessage());
                 }
+                return true;
+            });
+        }
+        if (openDiag != null) {
+            openDiag.setOnPreferenceClickListener(p -> {
+                try {
+                    requireActivity().getSupportFragmentManager()
+                        .beginTransaction()
+                        .replace(com.whispertflite.R.id.settings_container, new DiagnosticsFragment())
+                        .addToBackStack(null)
+                        .commit();
+                } catch (Throwable ignore) {}
                 return true;
             });
         }

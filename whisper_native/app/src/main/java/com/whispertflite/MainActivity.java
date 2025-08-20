@@ -1678,4 +1678,8 @@ public class MainActivity extends AppCompatActivity {
 //            whisper.start();
 //        }
 //    }
+
+    public com.whispertflite.frontend.PipelineController getPipelineController() {
+        return pipelineController;
+    }
 }
