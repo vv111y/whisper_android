@@ -118,6 +118,7 @@ public class PipelineController {
                 preRoll.clear();
                 captureFrames.clear();
                 capturingSpeechActive = false;
+                prevListeningSpeech = false; // re-arm rising edge after any capture
             }
             if (listener != null) listener.onStateChanged(state);
         }
@@ -129,6 +130,8 @@ public class PipelineController {
     public void startListening() {
         setState(State.LISTENING);
     listeningArmedAtUptimeMs = clock.now();
+    // Permit first start without waiting for cooldown
+    lastCaptureEndUptimeMs = listeningArmedAtUptimeMs - interUtteranceCooldownMs;
     }
     public void stop() { setState(State.IDLE); captureFrames.clear(); }
 
@@ -186,38 +189,48 @@ public class PipelineController {
     if (inputGated) return;
         // Maintain pre-roll while listening
         if (state == State.LISTENING) {
-            // store a copy to avoid aliasing
-            float[] copy = new float[frame.length];
-            System.arraycopy(frame, 0, copy, 0, frame.length);
-            preRoll.addLast(copy);
-            while (preRoll.size() > preRollFrames) preRoll.pollFirst();
-            // Frame-driven start: only on rising edge from non-speech -> speech while LISTENING
-    if (mode == Mode.SESSION && speech && !prevListeningSpeech) {
-        long now = clock.now();
-                // Respect arming delay
+            boolean risingEdge = (mode == Mode.SESSION && speech && !prevListeningSpeech);
+            long now = clock.now();
+            boolean canStart = false;
+            if (risingEdge) {
                 if (now - listeningArmedAtUptimeMs < minArmDelayMs) {
                     if (loggingEnabled) android.util.Log.d(TAG, "Blocked start: arming delay not met");
-            diagBlockedArming++;
+                    diagBlockedArming++;
                 } else if (now - lastCaptureEndUptimeMs < interUtteranceCooldownMs) {
                     if (loggingEnabled) android.util.Log.d(TAG, "Blocked start: inter-utterance cooldown");
-            diagBlockedCooldown++;
+                    diagBlockedCooldown++;
                 } else if (listeningSilenceFrames < requiredSilenceFramesBeforeCapture) {
                     if (loggingEnabled) android.util.Log.d(TAG, "Blocked start: insufficient pre-speech silence (have=" + listeningSilenceFrames + ", need=" + requiredSilenceFramesBeforeCapture + ")");
-            diagBlockedSilence++;
+                    diagBlockedSilence++;
                 } else {
-                    // Start capture
-                    captureFrames.clear();
-                    for (float[] fr : preRoll) {
-                        float[] prCopy = new float[fr.length];
-                        System.arraycopy(fr, 0, prCopy, 0, fr.length);
-                        captureFrames.add(prCopy);
-                    }
-                    capturingSpeechActive = false;
-                    setState(State.CAPTURING);
-                    if (loggingEnabled) android.util.Log.d(TAG, "Capture started (preRollFrames=" + preRoll.size() + ")");
-                    captureStartUptimeMs = now;
-            diagCaptureStarted++;
+                    canStart = true;
                 }
+            }
+
+            if (canStart) {
+                // Start capture using pre-roll frames PRIOR to the first speech frame
+                captureFrames.clear();
+                for (float[] fr : preRoll) {
+                    float[] prCopy = new float[fr.length];
+                    System.arraycopy(fr, 0, prCopy, 0, fr.length);
+                    captureFrames.add(prCopy);
+                }
+                // Add the current speech frame as first active frame
+                float[] curCopy = new float[frame.length];
+                System.arraycopy(frame, 0, curCopy, 0, frame.length);
+                captureFrames.add(curCopy);
+                capturingSpeechActive = true;
+                inCaptureSilenceCount = 0;
+                setState(State.CAPTURING);
+                if (loggingEnabled) android.util.Log.d(TAG, "Capture started (preRollFrames=" + preRoll.size() + ")");
+                captureStartUptimeMs = now;
+                diagCaptureStarted++;
+            } else {
+                // Not starting yet: maintain pre-roll with this frame
+                float[] copy = new float[frame.length];
+                System.arraycopy(frame, 0, copy, 0, frame.length);
+                preRoll.addLast(copy);
+                while (preRoll.size() > preRollFrames) preRoll.pollFirst();
             }
             // Track silence frames while listening (before speech onset)
             if (speech) {

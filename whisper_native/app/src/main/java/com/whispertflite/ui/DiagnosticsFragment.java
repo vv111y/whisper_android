@@ -283,8 +283,15 @@ public class DiagnosticsFragment extends PreferenceFragmentCompat {
         if (!isDebug()) return;
         com.whispertflite.frontend.PipelineController pc = getPc();
         if (pc == null) return;
-        // Snapshot tunables and then run a deterministic simulation
-        int frameSamples = pc.getFrameSamples();
+    // Snapshot tunables and then run a deterministic simulation
+    int frameSamples = pc.getFrameSamples();
+    long oldArm = pc.getMinArmDelayMs();
+    long oldCooldown = pc.getInterUtteranceCooldownMs();
+    int oldReqSil = pc.getRequiredSilenceFramesBeforeCapture();
+    int oldMerge = pc.getInCaptureSilenceFrames();
+    int oldMinUtter = pc.getMinUtteranceFrames();
+    long oldAbort = pc.getCaptureNoFramesAbortMs();
+    pc.resetDiagnostics();
         // Build some synthetic frames: silence, then speech blocks, then silence
         float[] silence = new float[frameSamples];
         float[] speech = new float[frameSamples];
@@ -295,10 +302,17 @@ public class DiagnosticsFragment extends PreferenceFragmentCompat {
         try {
             // Start session
             pc.startSession();
+            // Relax gates to exercise transitions deterministically
+            pc.setMinArmDelayMs(0);
+            pc.setInterUtteranceCooldownMs(0);
+            pc.setRequiredSilenceFramesBeforeCapture(2);
+            pc.setInCaptureSilenceFrames(Math.max(3, oldMerge));
+            pc.setMinUtteranceFrames(Math.max(3, oldMinUtter));
+            pc.setCaptureNoFramesAbortMs(5000);
             // 1) Immediately try to start with no silence -> should block on silence/arming
             int attempts = 5;
             for (int i = 0; i < attempts; i++) pc.onFrame(speech, true);
-            boolean blockedByArming = pc.getDiagBlockedArming() > 0 || pc.getArmingRemainingMs() > 0;
+            boolean blockedByArming = pc.getDiagBlockedArming() > 0 || pc.getArmingRemainingMs() > 0; // arming is 0 now
             boolean blockedBySilence = pc.getDiagBlockedSilence() > 0 || pc.getListeningSilenceFrames() < pc.getRequiredSilenceFramesBeforeCapture();
             report.append("- Rising edge before arming/silence: ")
                   .append(blockedByArming || blockedBySilence ? "blocked (OK)" : "not blocked (check)").append('\n');
@@ -324,6 +338,16 @@ public class DiagnosticsFragment extends PreferenceFragmentCompat {
             report.append("- Cooldown blocks immediate retrigger: ").append(cooldownBlocks ? "yes" : "no").append('\n');
         } catch (Throwable t) {
             report.append("Error: ").append(t.getMessage()).append('\n');
+        } finally {
+            // Restore tunables
+            try {
+                pc.setMinArmDelayMs(oldArm);
+                pc.setInterUtteranceCooldownMs(oldCooldown);
+                pc.setRequiredSilenceFramesBeforeCapture(oldReqSil);
+                pc.setInCaptureSilenceFrames(oldMerge);
+                pc.setMinUtteranceFrames(oldMinUtter);
+                pc.setCaptureNoFramesAbortMs(oldAbort);
+            } catch (Throwable ignore) {}
         }
 
         try {
