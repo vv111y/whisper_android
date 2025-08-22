@@ -9,23 +9,31 @@ For each sprint use a new live document that
 For each commit include an update to the sprint live doc so that all team members are up to date.
 
 ## PROJECT OVERVIEW
-## Current Milestone  [2025-08-21]
+
+### Current Milestone
+
+- Title: ASR + VAD Tuning Milestone
+- Doc: [Asr_Tuning_Milestone.md](Asr_Tuning_Milestone.md)
+- Updated: 2025-08-22
 
 
 - [ASR Tuning Milestone](ASR_TUNING_Milestone.md) This document tracks a two-tier optimization strategy for both offline ASR-in-the-loop tuning and on-device calibration. Use it to coordinate tasks, track progress, and capture decisions.
 
-This sprint works off the previous work done in:
+This milestone works off the previous work done in:
+
 - [VAD_Pipeline_Notes.md](VAD_Pipeline_Notes.md) This doc captures the current contract, tunables, and diagnostics for the voice pipeline and VAD engines.
 - [VAD_pipeline_tests_tuning](VAD_pipeline_tests_tuning.md) This app ships a Voice Activity Detection (VAD) pipeline with robust golden-audio unit tests and a closed-loop auto-tuning harness to search for good runtime tunables.
 
-Additional prior material [2025-08-xx uncertain dates, see git log]: 
+Additional prior material [2025-08-xx uncertain dates, see git log]:
+
 - [Diagnostics_Tuning_Guide_V1](Diagnostics_Tuning_Guide_V1.md) This guide explains the in-app Diagnostics system for the audio VAD + capture pipeline. It’s written for newcomers so you can confidently observe, tune, and export diagnostics without breaking things.
 - [Feature-wakeword](Feature-wakeword.md) WIP,  alternative to session-listening which is current default
 - [Feature-VAD_WebRTC_revert_notes](Feature-VAD_WebRTC_revert_notes.md) This document tracks a few targeted edits made during VAD/WebRTC experimentation that you may want to undo if they prove unnecessary (e.g., missing earcon was due to Do Not Disturb).
 
 
 ## Next Milestones
-###  WIP: Integrate Android TextToSpeech (TTS)
+
+### WIP: Integrate Android TextToSpeech (TTS)
 
 git info of prior work not finished:
 
@@ -48,24 +56,24 @@ then a6add093d46248d6593424c0f0c6e3e1f6baddec  update GUI, fix bugs, start TTS a
   Centralized TTS init via ensureTts()
   and call it on Activity start and when needed.
 
-###  file system access
+### file system access
 
 use SAF and external store for single app folder
 
 
-###  WIP: command router & app functionality
+### WIP: command router & app functionality
 
 chat mode
   "start new chat"
   on chat end give option: discard | name new chat
     if name -> (optional) add tags
-            -> save chat 
+            -> save chat
 
 record mode
   "starting new recording"
-  -> app: what kind? -> "personal" | "project <x>" | "work" | "new tag"
-  if new tag -> app: say tag name -> "<tag name>" -> app: creates new tag meta-data
-  -> recording starts. 
+  -> app: what kind? -> "personal" | "project `<x>`" | "work" | "new tag"
+  if new tag -> app: say tag name -> "`<tag name>`" -> app: creates new tag meta-data
+  -> recording starts.
   -> on tap end recording
   -> audio feedback recording saved
 
@@ -73,12 +81,12 @@ Other app functionality forthcoming
   ie. KB query | interaction
 
 
-###  feature: earbud mic implementation
+### feature: earbud mic implementation
 
 Implement feature and add ASR auto-tune task for optimal settings for this input
 
 
-###  finish WIP: wakeword
+### finish WIP: wakeword
 
 refactor wakeword to conform to new setup
 debug and tune after gathering audio samples
@@ -113,6 +121,7 @@ debug and tune after gathering audio samples
 - ASR tuner: `./gradlew tuneAsr -Dasr.manifest=docs/data/tuning_manifest.json -Dasr.audioDir=/abs/path/datasets_local/audio` → `build/asr_tune/best_config_asr.json`
 
 Notes:
+
 - Starter manifest at `docs/data/tuning_manifest.json`; local WAVs go under `datasets_local/audio/` (gitignored).
 
 ## Reports & Sprints
@@ -160,3 +169,23 @@ Devices for on device, connected tasks:
 ## PROJECT DOCUMENTATION & CONTEXT SYSTEM
 
 ## FINAL DOs AND DON'Ts
+
+
+# TODO, INTEGRATE BELOW INTO PROPER PLACES IN THIS FILE, CLEAN THIS FILE UP
+Stable workflows (names only, see README-DEV for commands)
+- Gradle tasks (root): `localCi`, `localCiConnected`, `tuneVad`, `tuneAsr`, `bundleCuratedConfig`.
+- Tests: unit tests under `app/src/test/...`, androidTest under `app/src/androidTest/...`.
+- Tuning harnesses exist (VAD unit, ASR androidTest); artifacts land in `build/*_tune/`.
+
+Stable conventions
+- Local datasets: `datasets_local/audio/` (gitignored). Manifests belong in `docs/data/`.
+- Curated configs (committed): `configs/vad/current.json`, `configs/asr/current.json`.
+- Build artifacts (not committed): `build/auto_tune/best_config.json`, `build/asr_tune/best_config_asr.json`.
+- Optional bundling: `bundleCuratedConfig` writes `app/src/main/assets/configs/current.json`.
+
+Key integration points (stable)
+- VAD engines: Energy (Java), WebRTC (JNI), Silero (ONNX).
+- ASR via TensorFlow Lite models; Silero VAD via ONNX Runtime; WebRTC VAD via JNI.
+
+Gotchas (stable)
+- androidTest ASR harness writes to the app’s external files dir; collection scripts/tasks may `adb pull` from there.
