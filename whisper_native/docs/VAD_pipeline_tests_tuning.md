@@ -1,6 +1,7 @@
-# Whisper Android – VAD pipeline tests and auto-tuning
+# Whisper Android – VAD pipeline tests and auto-tuning Milestone
 
-This app ships a Voice Activity Detection (VAD) pipeline with robust golden-audio unit tests and a closed-loop auto-tuning harness to search for good runtime tunables.
+## Phase 1 of full auto-tuning and auto-configuration of the speech system
+This sprint ships a Voice Activity Detection (VAD) pipeline with robust golden-audio unit tests and a closed-loop auto-tuning harness to search for good runtime tunables.
 
 ## Golden-audio tests (offline, fast)
 

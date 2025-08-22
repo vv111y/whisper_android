@@ -1,4 +1,4 @@
-# Diagnostics & Tuning Guide
+# Diagnostics & Tuning Guide V1.0
 
 This guide explains the in-app Diagnostics system for the audio VAD + capture pipeline. It’s written for newcomers so you can confidently observe, tune, and export diagnostics without breaking things.
 

@@ -1,8 +1,8 @@
 <!--
-  docs/ASR_TUNING_SPRINT.md
+  docs/ASR_TUNING_Milestone.md
   A living plan for ASR + VAD tuning: offline auto-optimization and in-app calibration.
 -->
-# ASR + VAD Tuning Sprint
+# ASR + VAD Tuning Milestone
 
 This document tracks a two-tier optimization strategy for both offline ASR-in-the-loop tuning and on-device calibration. Use it to coordinate tasks, track progress, and capture decisions.
 
