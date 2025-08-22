@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "notes": "Place your local WAVs under datasets_local/audio and reference paths here. This file can be committed.",
+  "samples": [
+    {
+      "id": "hello_world_01",
+      "audio": "datasets_local/audio/hello_world_01.wav",
+      "expected": "hello world",
+      "weight": 1.0
+    }
+  ]
+}

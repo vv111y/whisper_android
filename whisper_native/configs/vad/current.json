@@ -1,0 +1,4 @@
+{
+  "note": "Set by maintainer: points to the blessed VAD config in use for this build. Replace during release prep.",
+  "source": "configs/vad/best_config_vad_YYYY_MM_DD.json"
+}

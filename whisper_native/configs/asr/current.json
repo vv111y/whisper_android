@@ -1,0 +1,4 @@
+{
+  "note": "Set by maintainer: points to the blessed ASR config in use for this build. Replace during release prep.",
+  "source": "configs/asr/best_config_asr_YYYY_MM_DD.json"
+}

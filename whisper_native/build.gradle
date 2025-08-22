@@ -90,3 +90,69 @@ tasks.register("generateSpecstoryIndex") {
         println("Wrote ${outFile.path}")
     }
 }
+
+// Run ASR-in-the-loop tuning via connected tests and collect artifact
+tasks.register("tuneAsr") {
+    group = "verification"
+    description = "Run ASR tuning scenarios (androidTest) with -DasrTune=true and collect build/asr_tune/best_config_asr.json"
+    doLast {
+        // Allow overriding manifest and audio dir
+        def asrManifest = project.findProperty('asr.manifest') ?: 'docs/data/tuning_manifest.json'
+        def asrAudioDir = project.findProperty('asr.audioDir') ?: ''
+
+        // Pass arguments to instrumentation via testInstrumentationRunnerArguments
+        def args = [
+                "./gradlew", "-q", "app:connectedDebugAndroidTest",
+                "-Pandroid.testInstrumentationRunnerArguments.asrTune=true",
+                "-Pandroid.testInstrumentationRunnerArguments.asr.manifest=${asrManifest}"
+        ]
+        if (asrAudioDir) { args.add("-Pandroid.testInstrumentationRunnerArguments.asr.audioDir=${asrAudioDir}") }
+        exec { commandLine args }
+
+        // Pull artifact from device external files dir to module build folder
+        def appId = 'com.whispertflite'
+        def devicePath = "/sdcard/Android/data/${appId}/files/asr_tune/best_config_asr.json"
+        def appOutDir = file("app/build/asr_tune")
+        appOutDir.mkdirs()
+        try {
+            exec { commandLine "adb", "pull", devicePath, new File(appOutDir, 'best_config_asr.json').path }
+        } catch (Exception e) {
+            println("Warning: Failed to pull artifact from device: ${e.message}")
+        }
+
+        // Normalize to root build folder
+        def srcApp = file("app/build/asr_tune/best_config_asr.json")
+        def dstDir = file("build/asr_tune")
+        dstDir.mkdirs()
+        if (srcApp.exists()) {
+            copy { from srcApp; into dstDir }
+            println("best_config_asr.json copied to ${new File(dstDir, 'best_config_asr.json').path}")
+        } else {
+            println("ASR tuner ran, but best_config_asr.json was not found. Ensure the androidTest wrote it to external files.")
+        }
+    }
+}
+
+// Bundle curated config into app assets (copy configs/*/current.json)
+tasks.register("bundleCuratedConfig") {
+    group = "build"
+    description = "Copy configs/*/current.json into app/src/main/assets/configs/current.json for bundling"
+    doLast {
+        def srcAsr = file("configs/asr/current.json")
+        def srcVad = file("configs/vad/current.json")
+        def merged = new groovy.json.JsonSlurper().parseText('{}')
+        if (srcAsr.exists()) {
+            def asrObj = new groovy.json.JsonSlurper().parse(srcAsr)
+            merged.asr = asrObj
+        }
+        if (srcVad.exists()) {
+            def vadObj = new groovy.json.JsonSlurper().parse(srcVad)
+            merged.vad = vadObj
+        }
+        def outDir = file("app/src/main/assets/configs")
+        outDir.mkdirs()
+        def outFile = new File(outDir, "current.json")
+        outFile.text = new groovy.json.JsonBuilder(merged).toPrettyString()
+        println("Wrote bundled config to ${outFile.path}")
+    }
+}

@@ -52,19 +52,31 @@ Expose a quick calibration flow in-app (Debug → User build later) that:
 Model selection remains fixed per build; in-app tuning only adjusts lightweight parameters.
 
 ## Data Manifest Schema
-Each line in `tuning_manifest.jsonl`:
+Default path: `docs/data/tuning_manifest.json`
+
+Currently supported format (JSON array):
+
 ```json
 {
-  "audio": "history/clip1.wav",
-  "text": "Hello world",
-  "tags": ["clean", "speaker1"],
-  "snr": 25.0,
-  "duration_ms": 1200
+  "version": 1,
+  "samples": [
+    {
+      "audio": "datasets_local/audio/clip1.wav",
+      "text": "Hello world",
+      "tags": ["clean", "speaker1"],
+      "snr": 25.0,
+      "duration_ms": 1200
+    }
+  ]
 }
 ```
 
+Note: A JSONL variant is also acceptable in the future; for now we use a single JSON file with a `samples` array.
+
 ## Output Configuration Schema
+
 Output file `best_config_asr.json`:
+
 ```json
 {
   "vad": {
@@ -85,33 +97,40 @@ Output file `best_config_asr.json`:
 ```
 
 ## Engineering Plan
+
 - Define abstractions: `FrameSource`, `VadEngine`, `AsrEngine`.
 - Parameterize `PipelineAutoTuningTest` and add `AsrEvaluationTest` (skipped by default) for offline tuning.
 - Implement Gradle task `tuneAsr` to invoke connected tests with `-DasrTune=true` and persist `best_config_asr.json`.
 
 ## Testing Strategy
+
 - **Unit tests**: mock `AsrEngine` to validate scoring logic quickly.
 - **Instrumented tests**: small manifest (3–10 clips) across real VAD+ASR engines (androidTest).
 
 ## Gradle & CI
+
 - New task `tuneAsr` in `build.gradle` (root) under `verification` group.
 - CI job (nightly or manual) runs `./gradlew tuneAsr` and uploads `best_config_asr.json`.
 
 ## App UX & Calibration Flow
+
 - Add `CalibrationFragment` in Diagnostics for debug builds.
 - Display prompts, record, show progress, and write `user_profile.json`.
 
 ## Trade-offs
+
 - **Offline tuning**: exhaustive, reproducible, but slower (emulator or host CPU).
 - **On-device calibration**: fast, private, but limited parameter scope to preserve UX and battery.
 
 ## Next Steps
-- [ ] Collect or record representative audio clips and assemble `tuning_manifest.jsonl`.
-- [ ] Scaffold `AsrEvaluationTest` and Gradle `tuneAsr` task (disabled by default).
+
+- [ ] Collect or record representative audio clips and assemble `docs/data/tuning_manifest.json`.
+- [x] Scaffold `AsrEvaluationTest` and Gradle `tuneAsr` task (gated by asrTune flag).
 - [ ] Update CI workflow to include ASR tuning job.
 - [ ] Prototype `CalibrationFragment` UI and persistence logic.
 
 Proposed approach
+
 - Offline, comprehensive (CI/local workstation):
   - Dataset: short 16 kHz mono clips + ground-truth text in a JSONL manifest (audio, text, speaker/env tags).
   - Search space: VAD engine (energy/webrtc/silero) + VAD tunables + ASR model choice + Whisper decode params (beam size, temperature, patience, prompt bias, etc.).
@@ -127,6 +146,7 @@ Proposed approach
   - Model selection: fixed per build here (don’t swap large models in-app), but you can toggle VAD engine and a couple ASR decode params safely.
 
 Contracts to make this clean
+
 - Manifest (offline): one JSON object per line
   - audio: path or asset id
   - text: ground truth
@@ -138,6 +158,7 @@ Contracts to make this clean
   - score: { wer, cer, latencyMsP50/P95, rtf, falseTriggers, missed, composite }
 
 Engineering plan
+
 - Abstractions:
   - FrameSource (yields 320-sample frames + timestamps)
   - VadEngine (selectable impls)
@@ -153,5 +174,6 @@ Engineering plan
   - Reuse Diagnostics import/apply for applying ASR+VAD config.
 
 Trade-offs
+
 - Offline tuning yields best coverage (bigger search, reproducible). Emulator ASR can be slow—keep manifest tiny.
 - On-device calibration should be constrained to fast-safe params to avoid battery drain and long waits.

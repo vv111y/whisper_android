@@ -1,0 +1,14 @@
+# Build outputs
+/build/
+/app/build/
+
+# Local datasets (not committed)
+/datasets_local/
+
+# Android/IDE noise
+/.idea/
+/.gradle/
+local.properties
+
+# SpecStory transcripts are not committed
+/.specstory/
