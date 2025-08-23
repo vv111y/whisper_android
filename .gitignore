@@ -85,3 +85,17 @@ whisper_java/*.swo
 whisper_native/*.swo
 whisper_java/*.swn
 whisper_native/*.swn
+
+# more
+/.idea/
+/.vscode/
+/whisper_native/.vscode/
+**/.config
+**/.evc
+**/.evc.bk
+/whisper_native/screenshots/
+
+# models
+**/*.tflite
+**/*.onnx
+/whisper_android_workfile.org
