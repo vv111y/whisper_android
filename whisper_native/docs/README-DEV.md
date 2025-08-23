@@ -16,8 +16,12 @@ For each commit include an update to the sprint live doc so that all team member
 - Doc: [Asr_Tuning_Milestone.md](Asr_Tuning_Milestone.md)
 - Updated: 2025-08-22
 
+How to use this doc
 
-- [ASR Tuning Milestone](ASR_TUNING_Milestone.md) This document tracks a two-tier optimization strategy for both offline ASR-in-the-loop tuning and on-device calibration. Use it to coordinate tasks, track progress, and capture decisions.
+- Start with the Current Milestone above; it is the live source of truth.
+- Update this block (title/link/date) when the milestone changes.
+- Keep build/test shortcuts and conventions (below) in sync with the milestone decisions.
+
 
 This milestone works off the previous work done in:
 
@@ -119,6 +123,9 @@ debug and tune after gathering audio samples
 - Connected tests: `./gradlew connectedDebugAndroidTest`
 - VAD tuner: `./gradlew tuneVad` → `build/auto_tune/best_config.json`
 - ASR tuner: `./gradlew tuneAsr -Dasr.manifest=docs/data/tuning_manifest.json -Dasr.audioDir=/abs/path/datasets_local/audio` → `build/asr_tune/best_config_asr.json`
+- Local CI (unit only): `./gradlew localCi`
+- Local CI (with connected tests): `./gradlew localCiConnected`
+- Bundle curated configs into assets: `./gradlew bundleCuratedConfig`
 
 Notes:
 
@@ -145,14 +152,51 @@ Devices for on device, connected tasks:
   - Pixel 8a
   - GrapheneOS latest
 
+## Stable reference
+
+Stable workflows
+
+- Gradle tasks (root): `localCi`, `localCiConnected`, `tuneVad`, `tuneAsr`, `bundleCuratedConfig`.
+- Tests: unit tests under `app/src/test/...`, connected tests under `app/src/androidTest/...`.
+- Tuning harnesses: VAD (unit), ASR (androidTest); artifacts land in `build/*_tune/`.
+
+Stable conventions
+
+- Local datasets live at `datasets_local/audio/` (gitignored). Manifests go in `docs/data/`.
+- Curated configs (committed): `configs/vad/current.json`, `configs/asr/current.json`.
+- Build artifacts (not committed): `build/auto_tune/best_config.json`, `build/asr_tune/best_config_asr.json`.
+- Optional bundling: `bundleCuratedConfig` writes `app/src/main/assets/configs/current.json`.
+
+Key integration points
+
+- VAD engines: Energy (Java), WebRTC (JNI), Silero (ONNX).
+- ASR via TensorFlow Lite models; Silero VAD via ONNX Runtime; WebRTC VAD via JNI.
+
+Gotchas
+
+- The androidTest ASR harness writes artifacts to the app’s external files directory; collection tasks may `adb pull` from there (see tuneAsr wiring).
+
 ## WORKFLOW & RELEASE RULES
 
-- I am calling these 'reports' that are represented by your TEMPLATE.md. You have been effectively creating these for a work unit that involves 1–4 implementations that are debugged until working. What do you want to call these work units?
-  - Once you create one of these reports after implementations have been fixed, update the current Milestone (or Sprint) document to reflect the state of the project.
-  - Next, git commit your code edits, the report file, and the edits to the milestone/sprint file.
-  - After one or a few of these work units are complete, I will initiate a new chat. This is a manual process. I will notify you when this is done.
-  - Make changes to this master file when moving on to the next milestone/sprint, and as necessary to guide the overall project.
-  - The intent is to have a well organized project and workflow, where these files provide all the information that is needed.
+Use a simple, repo-first workflow. Keep chat ephemeral; persist outcomes in-repo.
+
+- Discrete work unit (1–4 related changes):
+  - Implement and verify (build/tests/linters).
+  - Write a Change Report using `docs/TEMPLATE.md` under `docs/Reports/` (scope, decisions, artifacts, follow-ups).
+  - Update the Current Milestone doc with progress, decisions, and artifact paths.
+  - Commit code + report + milestone updates together with a meaningful message.
+- Milestones:
+  - Keep the "Current Milestone" block (top of this file) pointing to the live doc.
+  - When a milestone completes, archive it and update this block to the next one.
+- Artifacts and configs:
+  - Do not commit build outputs (e.g., `build/auto_tune/**`, `build/asr_tune/**`).
+  - Commit curated configs under `configs/**` and update `configs/*/current.json` when promoting results.
+  - Optionally bundle defaults into `app/src/main/assets/configs/current.json` via `bundleCuratedConfig`.
+- Datasets:
+  - Keep audio data local (gitignored) under `datasets_local/**`.
+  - Commit dataset manifests under `docs/data/` and pass overrides via Gradle props when tuning.
+- Optional:
+  - Add short notes to `docs/AGENT_NOTES.md` for tips or context that don’t fit a report.
 
 ## POSSIBLE OTHER HEADERS, USE AT YOUR DISCRETION
 
@@ -169,23 +213,3 @@ Devices for on device, connected tasks:
 ## PROJECT DOCUMENTATION & CONTEXT SYSTEM
 
 ## FINAL DOs AND DON'Ts
-
-
-# TODO, INTEGRATE BELOW INTO PROPER PLACES IN THIS FILE, CLEAN THIS FILE UP
-Stable workflows (names only, see README-DEV for commands)
-- Gradle tasks (root): `localCi`, `localCiConnected`, `tuneVad`, `tuneAsr`, `bundleCuratedConfig`.
-- Tests: unit tests under `app/src/test/...`, androidTest under `app/src/androidTest/...`.
-- Tuning harnesses exist (VAD unit, ASR androidTest); artifacts land in `build/*_tune/`.
-
-Stable conventions
-- Local datasets: `datasets_local/audio/` (gitignored). Manifests belong in `docs/data/`.
-- Curated configs (committed): `configs/vad/current.json`, `configs/asr/current.json`.
-- Build artifacts (not committed): `build/auto_tune/best_config.json`, `build/asr_tune/best_config_asr.json`.
-- Optional bundling: `bundleCuratedConfig` writes `app/src/main/assets/configs/current.json`.
-
-Key integration points (stable)
-- VAD engines: Energy (Java), WebRTC (JNI), Silero (ONNX).
-- ASR via TensorFlow Lite models; Silero VAD via ONNX Runtime; WebRTC VAD via JNI.
-
-Gotchas (stable)
-- androidTest ASR harness writes to the app’s external files dir; collection scripts/tasks may `adb pull` from there.
